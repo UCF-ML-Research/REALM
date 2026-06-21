@@ -5,9 +5,7 @@
   <img src="docs/icon/realm.png" alt="REALM" width="100">
 </picture>
 
-# REALM
-
-**A Unified Red-Teaming Benchmark for Physical-World VLMs**
+# ReaLM: A Unified Red-Teaming Benchmark for Physical-World VLMs
 
 </div>
 
