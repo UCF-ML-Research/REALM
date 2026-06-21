@@ -8,7 +8,6 @@ from .advedm_attack import (
 )
 from .clip_contrastive_encoder import CLIPContrastiveEncoder
 from .vision_backends import ClipVisionBackend, TargetVLMVisionBackend
-from .gpt_annotator import gpt_annotate_background_region
 from .ensemble_encoder import EnsembleEncoder, SurrogateModel, CLIPModelSpec, PAPER_ENSEMBLE
 from .ssa_cwa import ssa_cwa_attack, ssa_gradient, dct_2d, idct_2d
 
@@ -20,7 +19,6 @@ __all__ = [
     "CLIPContrastiveEncoder",
     "ClipVisionBackend",
     "TargetVLMVisionBackend",
-    "gpt_annotate_background_region",
     "EnsembleEncoder",
     "SurrogateModel",
     "CLIPModelSpec",

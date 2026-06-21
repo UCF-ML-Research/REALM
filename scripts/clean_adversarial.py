@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-Clean adversarial images using registered defenses.
-
-Usage:
-    python scripts/clean_adversarial.py --defense pad --adversarial_images adv/ -o out/
-    python scripts/clean_adversarial.py --defense freqpure --adversarial_images adv_scene.png -o out/
-"""
+"""Clean adversarial images using registered defenses."""
 
 import argparse
 import json
@@ -30,7 +24,6 @@ def parse_args():
     p.add_argument("--prompt", type=str, default=None,
                    help="Text prompt (passed to defense via kwargs, used by bluesuffix)")
 
-    # Add defense-specific CLI args from registry
     for cli_args in DefenseRegistry.get_all_cli_arguments().values():
         for spec in cli_args:
             name = spec.pop("name")
@@ -44,7 +37,6 @@ def load_images(path_str: str, max_samples: int) -> list[Path]:
     if p.is_file():
         return [p]
 
-    # Check for manifest from generate_adversarial.py
     for manifest_name in ("results.json", "attack_results.json"):
         manifest = p / manifest_name
         if not manifest.exists():
@@ -63,7 +55,6 @@ def load_images(path_str: str, max_samples: int) -> list[Path]:
         if files:
             return files
 
-    # Plain directory
     files = sorted(list(p.glob("*.jpg")) + list(p.glob("*.png")) + list(p.glob("*.jpeg")))[:max_samples]
     if not files:
         raise ValueError(f"No images found in {path_str}")
@@ -80,7 +71,6 @@ def main():
     images = load_images(args.adversarial_images, args.max_samples)
     print(f"Images:  {len(images)}")
 
-    # Create defense
     spec = DefenseRegistry.get_spec(args.defense)
     config_kwargs = {"device": args.device}
     for param in spec.cli_params:
@@ -95,7 +85,6 @@ def main():
     results = []
     t0 = datetime.now()
 
-    # Build kwargs for defense.clean()
     clean_kwargs = {}
     if args.prompt is not None:
         clean_kwargs["prompt"] = args.prompt

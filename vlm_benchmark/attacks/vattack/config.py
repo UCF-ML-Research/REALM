@@ -42,13 +42,3 @@ def resolve_generate_kwargs(attack_name, args):
     if args.target_text:
         kwargs["target_text"] = args.target_text
     return kwargs
-
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import EVAL_QUERY
-    return {
-        "description": "V-Attack text-guided perturbation",
-        "reference_text": getattr(config, "target_text", ""),
-        "target_image": None,
-        "evaluation_query": EVAL_QUERY,
-    }

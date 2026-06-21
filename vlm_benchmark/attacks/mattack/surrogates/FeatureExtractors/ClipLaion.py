@@ -8,7 +8,6 @@ class ClipLaionFeatureExtractor(BaseFeatureExtractor):
     def __init__(self):
         super(ClipLaionFeatureExtractor, self).__init__()
         self.model = CLIPModel.from_pretrained("laion/CLIP-ViT-G-14-laion2B-s12B-b42K")
-        # self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14-336")
         self.normalizer = transforms.Compose(
         [
             transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC, antialias=True),
@@ -19,10 +18,9 @@ class ClipLaionFeatureExtractor(BaseFeatureExtractor):
     )
 
     def forward(self, x):
-        # x = torch.clamp(x, min=0, max=1)
         inputs = dict(pixel_values=self.normalizer(x))
         image_features = self.model.get_image_features(**inputs)
-        # Handle both old (tensor) and new (BaseModelOutputWithPooling) transformers versions
+        # support both old (tensor) and new transformers output types
         if not isinstance(image_features, torch.Tensor):
             image_features = image_features.pooler_output
         image_features = image_features / image_features.norm(dim=1, keepdim=True)

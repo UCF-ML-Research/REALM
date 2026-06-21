@@ -54,12 +54,10 @@ class EnsembleFeatureLoss(nn.Module):
     def __init__(self, extractors: List[BaseFeatureExtractor]):
         super(EnsembleFeatureLoss, self).__init__()
         self.extractors = nn.ModuleList(extractors)
-        # source features
         self.source_text = []
         self.source_image = []
         self.source_value = []
         self.source_features = []
-        # target features
         self.target_text = []
         self.mask = []
         self.mask_index = []

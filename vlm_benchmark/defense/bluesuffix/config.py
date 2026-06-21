@@ -5,33 +5,24 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 
 DEFAULT_CONFIG = {
-    # Component toggles
     "enable_image_purifier": True,
     "enable_text_purifier": True,
     "enable_suffix_generator": True,
 
-    # Diffusion denoising params
     "max_timesteps": "100",
     "num_denoising_steps": "20",
     "sampling_method": "ddim",
-    "diffusion_checkpoint": None,       # auto-resolved from assets/
+    "diffusion_checkpoint": None,
 
-    # Suffix generator
-    "suffix_generator_dir": None,       # auto-resolved from assets/suffix_generator/
+    "suffix_generator_dir": None,
 
-    # Text purifier
-    "openai_api_key": None,             # fallback to $OPENAI_API_KEY
+    "openai_api_key": None,
     "text_purifier_model": "gpt-4o",
 
-    # Infra
     "device": "cuda:0",
 }
 
-# Only BlueSuffix-unique CLI args. Shared diffusion args (max_timesteps,
-# num_denoising_steps, sampling_method) are omitted to avoid argparse
-# duplicate-flag errors — they are registered by FreqPure's
-# CLI_ARGUMENTS. They are still listed in cli_params in registry.py so
-# DefenseRegistry.create() picks them up correctly.
+# Only BlueSuffix-unique CLI args; shared diffusion args are registered by FreqPure to avoid argparse duplicates.
 CLI_ARGUMENTS = [
     {
         "name": "--enable_image_purifier",

@@ -16,10 +16,7 @@ _PROTO_DIR = Path(__file__).parent / "prototypes"
 
 @dataclass
 class PAAttackConfig(AttackConfig):
-    """PA-Attack configuration.
-
-    Epsilon and stepsize are in [0, 1] scale (e.g. 4/255 ~= 0.0157).
-    """
+    """PA-Attack configuration."""
     epsilon: float = 8.0 / 255.0
     max_iterations: int = 100
     stepsize: float = 1.0 / 255.0
@@ -60,17 +57,16 @@ class PAAttack(BaseAttack):
             cfg.clip_model_name, pretrained=cfg.clip_pretrained
         )
         model = model.visual
-        normalize = preprocess.transforms[-1]  # Normalize transform
+        normalize = preprocess.transforms[-1]
         self._clip_model = ClipVisionModel(model, normalize).to(cfg.device).eval()
 
-        # Load prototypes
         proto_path = cfg.prototype_path
         if proto_path is None:
             proto_path = str(_PROTO_DIR / "prototypes_tokens_3000_20_1024.pt")
         self._proto_tokens = torch.load(proto_path, map_location=cfg.device, weights_only=True)
 
     def _prepare_image(self, pil_img: Image.Image) -> torch.Tensor:
-        """Resize + CenterCrop + ToTensor -> [1, 3, H, W] in [0, 1]."""
+        """Preprocess a PIL image to a normalized [1, 3, H, W] tensor."""
         tensor = self._preprocess(pil_img)
         return tensor.unsqueeze(0).to(self.config.device)
 
@@ -84,17 +80,14 @@ class PAAttack(BaseAttack):
         pil_img = sample.images[0]
         img_tensor = self._prepare_image(pil_img)
 
-        # --- Extract clean tokens + attention ---
         with torch.no_grad():
             embedding_orig, tokens_orig, attentions = self._clip_model(
                 vision=img_tensor, output_normalize=cfg.output_normalize,
                 tokens=True, attention=True,
             )
-            # CLS-to-patch attention from target layer, averaged over heads
             cls2patch = attentions[cfg.attn_layer][:, :, 0, 1:].mean(dim=1)
             tokens_mask = F.softmax(cfg.attn_temp * cls2patch, dim=-1)
 
-        # --- Select most dissimilar prototype ---
         tokens_norm = F.normalize(tokens_orig, dim=-1)
         proto_tokens_norm = F.normalize(self._proto_tokens, dim=-1)
         token_sims = torch.einsum('bld,nld->bnl', tokens_norm, proto_tokens_norm)
@@ -102,7 +95,7 @@ class PAAttack(BaseAttack):
         min_sim, min_idx = torch.min(emb_similarity, dim=1)
         target_proto_tokens = self._proto_tokens[min_idx]
 
-        # --- Phase 1: PGD with clean attention mask ---
+        # Phase 1: PGD with clean attention mask
         loss_fn = ComputeLossWrapper(
             embedding_orig, tokens_orig, target_proto_tokens, tokens_mask, 'none',
         )
@@ -120,7 +113,7 @@ class PAAttack(BaseAttack):
             momentum=cfg.momentum,
         )
 
-        # --- Phase 2: recompute attention from phase 1 output, fresh PGD ---
+        # Phase 2: recompute attention from phase 1 output, fresh PGD
         with torch.no_grad():
             _, _, attentions2 = self._clip_model(
                 vision=phase1_out, output_normalize=cfg.output_normalize,
@@ -146,15 +139,12 @@ class PAAttack(BaseAttack):
             momentum=cfg.momentum,
         )
 
-        # --- Convert back to PIL ---
         adv_tensor = phase2_out.squeeze(0).clamp(0, 1).cpu()
-        # Resize back to original size
         orig_w, orig_h = pil_img.size
         adv_pil = transforms.ToPILImage()(adv_tensor)
         if (adv_pil.size[0] != orig_w) or (adv_pil.size[1] != orig_h):
             adv_pil = adv_pil.resize((orig_w, orig_h), Image.BICUBIC)
 
-        # Perturbation norm (per-phase is within epsilon; total from original may exceed)
         pert_norm = (phase2_out - img_tensor).abs().max().item()
 
         return AttackResult(
@@ -170,6 +160,3 @@ class PAAttack(BaseAttack):
                 "phase2_iters": cfg.max_iterations,
             },
         )
-
-    def is_gradient_based(self) -> bool:
-        return True

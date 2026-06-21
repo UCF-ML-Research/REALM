@@ -26,13 +26,3 @@ def resolve_generate_kwargs(attack_name, args):
     if hasattr(args, 'target') and args.target:
         kwargs["target_images_dir"] = args.target
     return kwargs
-
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import EVAL_QUERY
-    return {
-        "description": "AnyAttack decoder-based perturbation",
-        "reference_text": "Target-guided adversarial noise",
-        "target_image": None,
-        "evaluation_query": EVAL_QUERY,
-    }

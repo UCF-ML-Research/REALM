@@ -28,28 +28,7 @@ def pgd_attack(
     target_text_flag: bool = True,
     device: str = "cuda",
 ) -> torch.Tensor:
-    """Run PGD attack on a single image using CLIP ensemble.
-
-    Args:
-        image_org: Input image tensor in [0, 255] range, shape [1, C, H, W].
-        ensemble_extractor: EnsembleFeatureExtractor with loaded CLIP models.
-        ensemble_loss: EnsembleFeatureLoss with ground truth set.
-        source_crop: RandomResizedCrop transform (or Identity).
-        source_text: Encoded source text features (list per model).
-        target_text: Encoded target text features (list per model).
-        steps: Number of PGD iterations.
-        epsilon: L_inf perturbation bound (pixel space, [0,255]).
-        alpha: Adam learning rate.
-        vattack: If True, use V-features; if False, use X-features.
-        enhance: If True, use V@V attention enhancement.
-        both: If True, use both V and X features.
-        vision_attack: Whether to use vision-based attack loss.
-        target_text_flag: Whether to use targeted text loss.
-        device: Device string.
-
-    Returns:
-        Adversarial image tensor in [0, 1] range, shape [1, C, H, W].
-    """
+    """Run a PGD attack on a single image using a CLIP ensemble, returning an adversarial image in [0,1]."""
     delta = torch.zeros_like(image_org, requires_grad=True)
     optimizer = torch.optim.Adam([delta], lr=alpha)
 

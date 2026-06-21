@@ -1,6 +1,4 @@
-"""
-Minimal logging utilities for attacks module.
-"""
+"""Minimal logging utilities for attacks module."""
 
 import logging
 

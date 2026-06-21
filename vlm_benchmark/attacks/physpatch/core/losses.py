@@ -4,16 +4,7 @@ import torch
 
 
 def tv_loss(patch: torch.Tensor, reduction: str = "mean") -> torch.Tensor:
-    """
-    Total Variation Loss
-
-    Args:
-        patch: Input tensor of shape (B, C, H, W) or (C, H, W)
-        reduction: 'mean' or 'sum'
-
-    Returns:
-        Total variation loss value
-    """
+    """Total variation loss over a patch tensor."""
     if patch.dim() == 3:
         patch = patch.unsqueeze(0)
 
@@ -47,30 +38,15 @@ palette = torch.tensor([
 
 
 def nps_loss(patch: torch.Tensor, palette: torch.Tensor = palette) -> torch.Tensor:
-    """
-    Non-Printability Score (NPS) Loss
-
-    Measures how far patch colors are from a printable color palette.
-
-    Args:
-        patch: Input tensor of shape (B, C, H, W) or (C, H, W)
-        palette: Color palette tensor of shape (K, 3) in RGB format
-
-    Returns:
-        NPS loss value (mean minimum distance to palette colors)
-    """
+    """Non-Printability Score loss: mean distance from patch colors to a printable palette."""
     if patch.dim() == 3:
-        patch = patch.unsqueeze(0)  # (1, 3, H, W)
+        patch = patch.unsqueeze(0)
     B, C, H, W = patch.shape
 
-    # Reshape patch to (B, H*W, 3)
     patch_flat = patch.permute(0, 2, 3, 1).reshape(B, -1, 3)
 
-    # Expand palette for batch
-    palette = palette.to(patch.device).unsqueeze(0).expand(B, -1, -1)  # (B, K, 3)
+    palette = palette.to(patch.device).unsqueeze(0).expand(B, -1, -1)
 
-    # Compute distances to all palette colors
     dist = torch.cdist(patch_flat, palette)
 
-    # Return mean of minimum distances
     return dist.min(dim=-1).values.mean()

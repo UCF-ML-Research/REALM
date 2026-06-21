@@ -1,9 +1,4 @@
-"""
-FOA-Attack implementation for VLM benchmark.
-
-Implements full-image adversarial perturbations using Optimal Transport loss
-with CLIP ensemble optimization.
-"""
+"""FOA-Attack: full-image adversarial perturbations via Optimal Transport loss with CLIP ensemble optimization."""
 
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -24,73 +19,54 @@ from ...data import Sample
 class FOAAttackConfig(AttackConfig):
     """Configuration for FOA-Attack."""
 
-    # Inherited from AttackConfig:
-    # - epsilon: float = 16.0           # FOA uses [0, 255] range (legacy)
-    # - max_iterations: int = 300       # Optimization steps (legacy)
-    # - alpha: float = 1.0              # Step size (legacy)
-    # - device: str = "cuda"
     epsilon: float = 16.0
     max_iterations: int = 300
     alpha: float = 1.0
 
-    # Attack algorithm selection
     attack_method: str = "pgd"          # "fgsm", "mifgsm", "pgd"
 
-    # CLIP ensemble configuration
     backbone: List[str] = field(
         default_factory=lambda: ["B16", "B32", "Laion"]
     )
 
-    # FOA-specific: Optimal Transport clustering
-    cluster_number: int = 3             # Number of k-means clusters
-    use_adaptive_cluster: bool = True   # Auto-escalate 3→5 on failure
+    cluster_number: int = 3
+    use_adaptive_cluster: bool = True   # auto-escalate 3→5 on failure
 
-    # Crop parameters for feature matching
-    use_source_crop: bool = True        # Crop adversarial image
-    use_target_crop: bool = True        # Crop target image
+    use_source_crop: bool = True
+    use_target_crop: bool = True
     crop_scale: Tuple[float, float] = (0.5, 0.9)
 
-    # LLM similarity scoring (legacy adaptive cluster)
-    # Use legacy model keys for api_keys.{yaml|yml|json} lookup.
+    # Legacy model keys used for api_keys.{yaml|yml|json} lookup
     llm_description_model: str = "gpt-4o-mini"
     llm_scorer_model: str = "gpt-4o-mini"
     llm_similarity_threshold: float = 0.5
 
-    # Target configuration
-    target_strategy: str = "stop_sign"  # Matches PhysPatch pattern
+    target_strategy: str = "stop_sign"
     target_images_dir: Optional[str] = None
 
-    # Image resolution (224×224 matching legacy)
     input_res: int = 224
 
 
 class FOAAttack(BaseAttack):
-    """
-    FOA-Attack wrapper integrating with VLM benchmark.
-
-    Implements full-image adversarial perturbations using Optimal Transport
-    loss with CLIP ensemble optimization.
-    """
+    """FOA-Attack wrapper integrating with the VLM benchmark."""
 
     def __init__(self, config: FOAAttackConfig):
         super().__init__(config)
         self.config: FOAAttackConfig = config
 
         # Lazy initialization (models are heavy)
-        self._model_cache = {}  # Cache by (backbones, cluster_number)
-        self._desc_cache = {}   # Cache descriptions by key
+        self._model_cache = {}
+        self._desc_cache = {}
 
     def _initialize_models(self, cluster_number: int):
-        """Lazy load CLIP surrogate models with specific cluster number."""
-        # Create cache key
+        """Lazy load CLIP surrogate models for a specific cluster number."""
         cache_key = (tuple(self.config.backbone), cluster_number)
 
         if cache_key in self._model_cache:
-            return  # Already initialized
+            return
 
         print(f"Loading CLIP ensemble models (cluster={cluster_number})...")
 
-        # Import FOA modules
         from .core.surrogates import (
             ClipB16FeatureExtractor,
             ClipB32FeatureExtractor,
@@ -100,7 +76,6 @@ class FOAAttack(BaseAttack):
             EnsembleFeatureLoss_OT_foa_attack,
         )
 
-        # Backbone mapping
         BACKBONE_MAP = {
             "B16": ClipB16FeatureExtractor,
             "B32": ClipB32FeatureExtractor,
@@ -108,7 +83,6 @@ class FOAAttack(BaseAttack):
             "Laion": ClipLaionFeatureExtractor,
         }
 
-        # Load backbones
         models = []
         for backbone in self.config.backbone:
             if backbone not in BACKBONE_MAP:
@@ -120,7 +94,6 @@ class FOAAttack(BaseAttack):
             models.append(model)
             print(f"  ✓ Loaded {backbone}")
 
-        # Create ensemble with cluster number
         ensemble_extractor = EnsembleFeatureExtractor_ot(
             models, cluster_number=cluster_number
         )
@@ -128,14 +101,12 @@ class FOAAttack(BaseAttack):
             models, cluster_number=cluster_number
         )
 
-        # Cache the models
         self._model_cache[cache_key] = (ensemble_extractor, ensemble_loss)
 
         print(f"✓ Ensemble ready with cluster={cluster_number}\n")
 
     def _prepare_image(self, image: Image.Image) -> torch.Tensor:
-        """Convert PIL image to tensor in [0, 255] range (NOT normalized)."""
-        # Resize to FOA resolution
+        """Convert PIL image to a tensor in [0, 255] range (not normalized)."""
         image = transforms.Resize(
             self.config.input_res,
             interpolation=transforms.InterpolationMode.BICUBIC
@@ -143,7 +114,7 @@ class FOAAttack(BaseAttack):
         image = transforms.CenterCrop(self.config.input_res)(image)
         image = image.convert("RGB")
 
-        # Convert to tensor WITHOUT normalization (keep [0, 255] range)
+        # Keep [0, 255] range without normalization
         mode_to_nptype = {"I": np.int32, "I;16": np.int16, "F": np.float32}
         img_array = np.array(image, mode_to_nptype.get(image.mode, np.uint8), copy=True)
         img_tensor = torch.from_numpy(img_array)
@@ -153,20 +124,16 @@ class FOAAttack(BaseAttack):
         return img_tensor.unsqueeze(0).to(self.config.device)
 
     def _tensor_to_pil(self, tensor: torch.Tensor) -> Image.Image:
-        """Convert tensor from [0, 1] range back to PIL image."""
-        # Tensor comes back in [0, 1] range from attack
-        # Handle both [B, C, H, W] and [C, H, W] formats
+        """Convert a [0, 1]-range tensor back to a PIL image."""
         if len(tensor.shape) == 4:
-            tensor = tensor.squeeze(0)  # Remove batch dimension
+            tensor = tensor.squeeze(0)
         elif len(tensor.shape) != 3:
             raise ValueError(f"Expected tensor with 3 or 4 dimensions, got {len(tensor.shape)}")
 
         tensor = torch.clamp(tensor, 0, 1)
 
-        # Convert to [0, 255] uint8
         tensor = (tensor * 255).cpu().byte()
 
-        # Convert to numpy and then PIL
         img_array = tensor.permute(1, 2, 0).numpy()
         return Image.fromarray(img_array, mode='RGB')
 
@@ -179,7 +146,6 @@ class FOAAttack(BaseAttack):
         if not target_dir.exists():
             raise FileNotFoundError(f"Target images dir not found: {target_dir}")
 
-        # Determine clean stem
         stem = None
         if hasattr(sample, "metadata") and sample.metadata.get("image_file"):
             stem = Path(sample.metadata["image_file"]).stem
@@ -201,13 +167,11 @@ class FOAAttack(BaseAttack):
                 f"Target image not found for stem '{stem}' in {target_dir}"
             )
 
-        # Load and prepare
         target_pil = Image.open(target_path).convert('RGB')
         return self._prepare_image(target_pil), str(target_path)
 
     def _create_crops(self):
-        """Create crop functions for source and target (no coordinate constraints)."""
-        # FOA uses simple RandomResizedCrop without coordinate constraints
+        """Create RandomResizedCrop functions for source and target images."""
         if self.config.use_source_crop:
             source_crop = transforms.RandomResizedCrop(
                 size=self.config.input_res,
@@ -235,15 +199,12 @@ class FOAAttack(BaseAttack):
         cluster_number: int,
         sample_idx: int,
     ) -> torch.Tensor:
-        """Run attack with specific cluster number."""
-        # Ensure models are initialized for this cluster
+        """Run the attack with a specific cluster number."""
         self._initialize_models(cluster_number)
 
-        # Get cached models
         cache_key = (tuple(self.config.backbone), cluster_number)
         ensemble_extractor, ensemble_loss = self._model_cache[cache_key]
 
-        # Select attack function
         from .core.attacks import fgsm_attack, mifgsm_attack, pgd_attack
 
         attack_fn_map = {
@@ -255,7 +216,6 @@ class FOAAttack(BaseAttack):
 
         print(f"Running {self.config.attack_method.upper()} attack (cluster={cluster_number})...")
 
-        # Run attack
         adv_image = attack_fn(
             image_tensor=clean_image,
             tgt_tensor=target_image,
@@ -275,10 +235,9 @@ class FOAAttack(BaseAttack):
         return adv_image
 
     def _get_api_key(self, model_key: Optional[str] = None) -> str:
-        """Get API key from legacy api_keys.{yaml|yml|json} or OPENAI_API_KEY environment variable."""
+        """Get API key from api_keys.{yaml|yml|json} or the OPENAI_API_KEY env var."""
         key_name = model_key or self.config.llm_description_model
 
-        # Try file-based keys first
         for ext in ("yaml", "yml", "json"):
             path = Path(f"api_keys.{ext}")
             if path.exists():
@@ -292,7 +251,6 @@ class FOAAttack(BaseAttack):
                 if key_name in keys:
                     return keys[key_name]
 
-        # Fall back to environment variable
         env_key = os.environ.get("OPENAI_API_KEY")
         if env_key:
             return env_key
@@ -302,13 +260,6 @@ class FOAAttack(BaseAttack):
             "Create api_keys.yaml, api_keys.yml, or api_keys.json with required keys, "
             "or set OPENAI_API_KEY environment variable."
         )
-
-    def _encode_pil_image(self, image: Image.Image, fmt: str = "JPEG") -> str:
-        import base64
-        import io
-        buffered = io.BytesIO()
-        image.save(buffered, format=fmt)
-        return base64.b64encode(buffered.getvalue()).decode()
 
     @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
     def _describe_image_path(self, image_path: str) -> str:
@@ -322,7 +273,6 @@ class FOAAttack(BaseAttack):
         with open(image_path, "rb") as f:
             import base64
             base64_image = base64.b64encode(f.read()).decode("utf-8")
-        # Legacy uses model name keys like "gpt4o" and maps to OpenAI model IDs.
         model_name = self._map_openai_model(self.config.llm_description_model)
         response = client.chat.completions.create(
             model=model_name,
@@ -377,7 +327,7 @@ class FOAAttack(BaseAttack):
             print(f"Warning: Empty response from LLM similarity scoring. Defaulting to 0.5")
             return 0.5
         score_text = score_text.strip()
-        # Try to extract number from text (sometimes LLM adds extra text)
+        # Extract the number; the LLM sometimes adds extra text
         import re
         match = re.search(r'(\d+\.?\d*)', score_text)
         if match:
@@ -428,7 +378,6 @@ class FOAAttack(BaseAttack):
 
         # Quick evaluation using surrogate similarity
         adv_pil_3 = self._tensor_to_pil(adv_image_3)
-        # Save adversarial image for path-based description
         adv_tmp_path = Path("/tmp") / f"foa_adv_{sample_idx}_cluster3.png"
         adv_pil_3.save(adv_tmp_path)
         sim_score = self._llm_similarity(target_path, str(adv_tmp_path))
@@ -453,25 +402,12 @@ class FOAAttack(BaseAttack):
         sample: Sample,
         **kwargs
     ) -> AttackResult:
-        """
-        Generate FOA adversarial example.
-
-        Args:
-            model: VLM model (can be None for surrogate-only attack)
-            sample: Clean sample to attack
-            **kwargs: Additional arguments
-
-        Returns:
-            AttackResult with adversarial image and metadata
-        """
-        # 1. Prepare images (clean + target)
+        """Generate a FOA adversarial example for the given sample."""
         clean_image = self._prepare_image(sample.images[0])
         target_image, target_path = self._load_target_image(sample)
 
-        # 2. Create crops (no coordinate constraints)
         source_crop, target_crop = self._create_crops()
 
-        # 3. Run attack with adaptive clustering
         sample_idx = kwargs.get("sample_idx", None)
         if sample_idx is None:
             try:
@@ -482,10 +418,8 @@ class FOAAttack(BaseAttack):
             clean_image, target_image, source_crop, target_crop, sample_idx, target_path
         )
 
-        # 4. Convert to PIL
         adv_pil = self._tensor_to_pil(adv_image)
 
-        # 5. Evaluate (if model provided)
         original_output = ""
         adversarial_output = ""
         success = False
@@ -494,7 +428,6 @@ class FOAAttack(BaseAttack):
             original_output = model.inference([sample.images[0]], sample.question).text
             adversarial_output = model.inference([adv_pil], sample.question).text
 
-            # Check if target object appears in adversarial output
             target_keywords = {
                 "stop_sign": ["stop", "sign"],
                 "plane": ["plane", "airplane", "aircraft"],
@@ -503,14 +436,13 @@ class FOAAttack(BaseAttack):
             keywords = target_keywords.get(self.config.target_strategy, ["stop"])
             success = any(kw in adversarial_output.lower() for kw in keywords)
 
-        # 6. Return result
         return AttackResult(
             success=success,
             adversarial_sample=adv_pil,
             original_output=original_output,
             adversarial_output=adversarial_output,
             perturbation_norm=self.config.epsilon / 255.0,
-            queries=1,  # Surrogate-based, minimal queries
+            queries=1,
             metadata={
                 "attack_method": self.config.attack_method,
                 "cluster_number": final_cluster,
@@ -519,7 +451,3 @@ class FOAAttack(BaseAttack):
                 "use_adaptive_cluster": self.config.use_adaptive_cluster,
             }
         )
-
-    def is_gradient_based(self) -> bool:
-        """FOA uses surrogate model gradients."""
-        return True

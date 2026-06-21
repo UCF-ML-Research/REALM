@@ -26,6 +26,8 @@ class ClipB16FeatureExtractor(BaseFeatureExtractor):
     def forward(self, x):
         inputs = dict(pixel_values=self.normalizer(x))
         image_features = self.model.get_image_features(**inputs)
+        if not isinstance(image_features, torch.Tensor):
+            image_features = image_features.pooler_output
         image_features = image_features / image_features.norm(dim=1, keepdim=True)
         return image_features
 
@@ -97,5 +99,7 @@ class ClipB16FeatureExtractor(BaseFeatureExtractor):
         inputs = self.processor(text=text, return_tensors="pt", padding=True)
         inputs.to(self.model.device)
         text_features = self.model.get_text_features(**inputs)
+        if not isinstance(text_features, torch.Tensor):
+            text_features = text_features.pooler_output
         text_features = text_features / text_features.norm(dim=1, keepdim=True)
         return text_features

@@ -3,16 +3,13 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 
 DEFAULT_CONFIG = {
-    # FreqPure frequency-domain params
     "amplitude_cut_range": 10,
     "phase_cut_range": 10,
     "delta": 0.3,
     "forward_noise_steps": 50,
-    # Diffusion schedule (same meaning as BlueSuffix)
     "max_timesteps": "50,50,50,50,50,50,50,50",
     "num_denoising_steps": "5,5,5,5,5,5,5,5",
     "sampling_method": "ddpm",
-    # Infra
     "diffusion_checkpoint": None,    # auto-resolved from assets/
     "device": "cuda:0",
 }
@@ -26,8 +23,7 @@ CLI_ARGUMENTS = [
      "help": "FreqPure max phase deviation (default: 0.3)"},
     {"name": "--forward_noise_steps", "type": int, "default": None,
      "help": "FreqPure reference noise timestep (default: 50)"},
-    # Shared diffusion params (also used by BlueSuffix — registered here once to
-    # avoid argparse duplicate-flag errors; omitted from bluesuffix/config.py)
+    # Shared diffusion params registered here once to avoid argparse duplicate-flag errors.
     {"name": "--max_timesteps", "type": str, "default": None,
      "help": "Max diffusion timesteps, comma-separated (default varies by defense)"},
     {"name": "--num_denoising_steps", "type": str, "default": None,

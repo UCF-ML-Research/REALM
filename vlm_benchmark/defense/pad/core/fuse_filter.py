@@ -37,15 +37,12 @@ def heatmap_filter(heatmap, threshold, height, width):
 
     base_kernel_size = int(min(height, width)/kernel_param)
 
-    # MORPH_OPEN
     kernel = np.ones((base_kernel_size*2, base_kernel_size*2), np.uint8)
     h_t_o = cv2.morphologyEx(h_t, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    # MORPH_CLOSE
     kernel = np.ones((base_kernel_size, base_kernel_size), np.uint8)
     h_t_o_c = cv2.morphologyEx(h_t_o, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    # MORPH_OPEN
     kernel = np.ones((base_kernel_size*3, base_kernel_size*3), np.uint8)
     h_t_o_c_o = cv2.morphologyEx(h_t_o_c, cv2.MORPH_OPEN, kernel, iterations=2)
 

@@ -1,19 +1,10 @@
-"""
-Chain of Attack (CoA) implementation for VLM benchmark.
-
-CoA uses iterative caption generation during PGD optimization, creating a semantic
-chain from clean description → target description using ClipCap (CLIP + GPT-2).
-
-Reference: Chain of Attack (CoA), CVPR 2025
-"""
+"""Chain of Attack (CoA) implementation for VLM benchmark (CVPR 2025)."""
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Dict
-import time
+from typing import Optional, Dict
 
 import torch
-import torch.nn.functional as F
 import numpy as np
 from PIL import Image
 import torchvision.transforms as T
@@ -26,61 +17,25 @@ from .data.coa_dataset import CoADataset
 
 @dataclass
 class COAAttackConfig(AttackConfig):
-    """Configuration for Chain of Attack.
+    """Configuration for Chain of Attack."""
 
-    Attributes:
-        epsilon: L_inf perturbation bound (default: 16.0)
-        max_iterations: Number of PGD steps (default: 100)
-        alpha: PGD step size (default: 1.0)
-        device: Device to run on
-
-        # CLIP configuration
-        clip_model_name: CLIP model to use
-        input_res: Input resolution for CLIP
-
-        # ClipCap configuration
-        clipcap_weights_path: Path to ClipCap weights (auto-set if None)
-        prefix_length: ClipCap prefix length
-
-        # Multimodal fusion
-        fusion_type: Fusion strategy ("cat", "add_weight", "multiplication")
-        a_weight: Weight for image in fusion (0.3 = 0.3×image + 0.7×text)
-        p_neg: Negative similarity weight in triplet loss
-
-        # Caption generation speedup
-        use_caption_speedup: Update caption every N steps instead of every step
-        caption_update_steps: Caption update frequency (1=every step)
-
-        # Data paths (auto-set)
-        target_images_dir: Directory with target images
-        target_captions_path: Path to target captions file
-        clean_captions_path: Path to clean captions file
-        target_strategy: Target type (e.g., "stop_sign")
-    """
-
-    # Override defaults from AttackConfig
     epsilon: float = 16.0
     max_iterations: int = 100
     alpha: float = 1.0
 
-    # CLIP configuration
     clip_model_name: str = "ViT-B/32"
     input_res: int = 224
 
-    # ClipCap configuration
     clipcap_weights_path: Optional[str] = None
     prefix_length: int = 10
 
-    # Multimodal fusion
     fusion_type: str = "add_weight"
     a_weight: float = 0.3
     p_neg: float = 0.7
 
-    # Caption generation speedup
     use_caption_speedup: bool = False
     caption_update_steps: int = 1
 
-    # Data paths
     target_images_dir: Optional[str] = None
     target_captions_path: Optional[str] = None
     clean_captions_path: Optional[str] = None
@@ -112,10 +67,9 @@ class COAAttack(BaseAttack):
         self._caption_model_initialized = False
         self.to_pil = T.ToPILImage()
 
-        # Caption caches (generated on-the-fly)
         self.clean_captions_cache: Dict[str, str] = {}
         self.target_captions_cache: Dict[str, str] = {}
-        self.captions_modified = False  # Track if we need to save captions
+        self.captions_modified = False
         self._target_caption_warned = False
 
     def _initialize_models(self):
@@ -128,15 +82,13 @@ class COAAttack(BaseAttack):
         import clip
         from transformers import GPT2Tokenizer
 
-        # Load CLIP
         print(f"  Loading CLIP model: {self.config.clip_model_name}")
         self.clip_model, self.clipcap_preprocess = clip.load(
             self.config.clip_model_name, device=self.config.device, jit=False
         )
         self.clip_model.eval()
 
-        # Define custom CLIP preprocessing for attack loop (exactly as in legacy code)
-        # This matches legacy Chain_of_Attack/train.py lines 332-338
+        # Custom CLIP preprocessing matching legacy Chain_of_Attack/train.py
         self.clip_preprocess = T.Compose([
             T.Resize(
                 self.clip_model.visual.input_resolution,
@@ -151,7 +103,6 @@ class COAAttack(BaseAttack):
             ),
         ])
 
-        # Load ClipCap
         print(f"  Loading ClipCap from: {self.config.clipcap_weights_path}")
         self.cap_model = ClipCaptionModel(prefix_length=self.config.prefix_length)
         self.cap_model.load_state_dict(
@@ -160,13 +111,10 @@ class COAAttack(BaseAttack):
         )
         self.cap_model = self.cap_model.eval().to(self.config.device)
 
-        # Load GPT2 tokenizer
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
-        # Store caption generation function
         self.generate_cap = generate_cap
 
-        # Import clip module for tokenization
         self.clip_module = clip
 
         self._models_initialized = True
@@ -192,23 +140,12 @@ class COAAttack(BaseAttack):
         print("✓ Caption generation model initialized")
 
     def _generate_caption(self, image_path: str) -> str:
-        """
-        Generate caption for an image using Qwen3-VL.
-
-        Args:
-            image_path: Path to image file
-
-        Returns:
-            Generated caption string
-        """
-        # Check cache first
+        """Generate a caption for an image using Qwen-VL."""
         if image_path in self.clean_captions_cache:
             return self.clean_captions_cache[image_path]
 
-        # Initialize caption model if needed
         self._initialize_caption_model()
 
-        # Prepare message
         messages = [
             {
                 "role": "user",
@@ -225,7 +162,6 @@ class COAAttack(BaseAttack):
             }
         ]
 
-        # Generate caption using official Qwen VL pipeline
         text = self.caption_processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
@@ -246,12 +182,11 @@ class COAAttack(BaseAttack):
                 clean_up_tokenization_spaces=False
             )[0].strip()
 
-        # Fallback to OpenAI if caption contains non-ASCII (e.g. Chinese from Qwen)
+        # Fall back to OpenAI if caption contains non-ASCII (e.g. Chinese from Qwen)
         import re
         if re.search(r'[^\x00-\x7F]', caption):
             caption = self._gpt_caption(image_path, "clean")
 
-        # Cache the caption
         self.clean_captions_cache[image_path] = caption
         self.captions_modified = True
         print(f"  Generated caption: {caption[:60]}...")
@@ -259,13 +194,7 @@ class COAAttack(BaseAttack):
         return caption
 
     def _generate_target_caption(self, image_path: str) -> str:
-        """Generate a caption for a target image to guide the attack.
-
-        The caption is used as the text branch of CoA's multimodal fusion
-        target embedding.  Manual captions that express specific adversarial
-        intent will generally produce stronger attacks; this auto-generation
-        is a convenience fallback.
-        """
+        """Generate a caption for a target image to guide the attack."""
         if image_path in self.target_captions_cache:
             return self.target_captions_cache[image_path]
 
@@ -325,7 +254,7 @@ class COAAttack(BaseAttack):
                 clean_up_tokenization_spaces=False,
             )[0].strip().strip('"').strip("'")
 
-        # Fallback to OpenAI if caption contains non-ASCII (e.g. Chinese from Qwen)
+        # Fall back to OpenAI if caption contains non-ASCII (e.g. Chinese from Qwen)
         import re
         if re.search(r'[^\x00-\x7F]', caption):
             caption = self._gpt_caption(image_path, "target")
@@ -341,7 +270,7 @@ class COAAttack(BaseAttack):
         import base64
         from openai import OpenAI
 
-        client = OpenAI()  # uses OPENAI_API_KEY env var
+        client = OpenAI()  # uses OPENAI_API_KEY
         with open(image_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         suffix = Path(image_path).suffix.lstrip(".")
@@ -375,13 +304,7 @@ class COAAttack(BaseAttack):
         output_path: str,
         captions_cache: Optional[Dict[str, str]] = None,
     ):
-        """Save generated captions to file for reuse.
-
-        Args:
-            images_dir: Directory with images (to determine sorted order)
-            output_path: Path to save captions file
-            captions_cache: Cache dict to save (defaults to clean_captions_cache)
-        """
+        """Save generated captions to file for reuse."""
         cache = captions_cache if captions_cache is not None else self.clean_captions_cache
         if not cache:
             return
@@ -389,7 +312,6 @@ class COAAttack(BaseAttack):
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Load existing captions if file exists
         images_dir = Path(images_dir)
         image_paths = sorted(
             list(images_dir.glob("*.jpg"))
@@ -405,17 +327,15 @@ class COAAttack(BaseAttack):
                 if i < len(image_paths) and line.strip():
                     existing_captions[str(image_paths[i])] = line.strip()
 
-        # Merge existing + new captions
         all_captions = {**existing_captions, **cache}
 
-        # Write captions in image order
         captions = []
         for img_path in image_paths:
             img_path_str = str(img_path)
             if img_path_str in all_captions:
                 captions.append(all_captions[img_path_str])
             else:
-                break  # Stop at first missing caption to keep file consistent
+                break  # stop at first missing caption to keep file consistent
 
         with open(output_path, "w") as f:
             for caption in captions:
@@ -431,43 +351,27 @@ class COAAttack(BaseAttack):
         tgt_img_tensor: torch.Tensor,
         tgt_caption: str,
     ) -> torch.Tensor:
-        """
-        Run CoA PGD attack using logic from legacy/Chain_of_Attack/train.py.
-
-        Args:
-            clean_img_tensor: Clean image tensor [C, H, W] in [0, 255]
-            clean_caption: Clean image caption
-            tgt_img_tensor: Target image tensor [C, H, W] in [0, 255]
-            tgt_caption: Target caption
-
-        Returns:
-            Adversarial image tensor [C, H, W] in [0, 255]
-        """
-        # Add batch dimension
-        image_org = clean_img_tensor.unsqueeze(0).to(self.config.device)  # [1, C, H, W]
+        """Run CoA PGD attack, returning the adversarial image tensor [C, H, W] in [0, 255]."""
+        image_org = clean_img_tensor.unsqueeze(0).to(self.config.device)
         image_tgt = tgt_img_tensor.unsqueeze(0).to(self.config.device)
 
-        # Tokenize captions
         cle_text = self.clip_module.tokenize([clean_caption]).to(self.config.device)
         tgt_text = self.clip_module.tokenize([tgt_caption]).to(self.config.device)
 
-        # Compute STATIC target and clean features
+        # Compute static target and clean features
         with torch.no_grad():
-            # Target features
             tgt_image_features = self.clip_model.encode_image(self.clip_preprocess(image_tgt))
             tgt_image_features = tgt_image_features / tgt_image_features.norm(dim=1, keepdim=True)
 
             tgt_text_features = self.clip_model.encode_text(tgt_text)
             tgt_text_features = tgt_text_features / tgt_text_features.norm(dim=1, keepdim=True)
 
-            # Clean features
             cle_image_features = self.clip_model.encode_image(self.clip_preprocess(image_org))
             cle_image_features = cle_image_features / cle_image_features.norm(dim=1, keepdim=True)
 
             cle_text_features = self.clip_model.encode_text(cle_text)
             cle_text_features = cle_text_features / cle_text_features.norm(dim=1, keepdim=True)
 
-            # Compute fused embeddings
             a = self.config.a_weight
             fusion_type = self.config.fusion_type
 
@@ -498,21 +402,16 @@ class COAAttack(BaseAttack):
         for j in range(self.config.max_iterations):
             adv_image = image_org + delta
 
-            # Clone for caption generation (need [0, 1] range)
             adv_image_clone = adv_image.clone() / 255.0
 
-            # Preprocess for CLIP
             adv_image_clip = self.clip_preprocess(adv_image)
 
-            # Generate current caption (DYNAMIC!)
+            # Regenerate the caption dynamically each step (or reuse if speedup enabled)
             if self.config.use_caption_speedup and j % self.config.caption_update_steps != 0:
-                # Reuse last caption
                 current_caption_list = last_caption_list
             else:
-                # Generate new caption (exactly as in legacy code)
                 current_caption_list = []
-                image_pil = self.to_pil(adv_image_clone[0].cpu())  # Move to CPU for PIL conversion
-                # Use clipcap_preprocess from clip.load() for ClipCap image encoding
+                image_pil = self.to_pil(adv_image_clone[0].cpu())
                 processed_image = self.clipcap_preprocess(image_pil).unsqueeze(0).to(self.config.device)
 
                 with torch.no_grad():
@@ -527,7 +426,6 @@ class COAAttack(BaseAttack):
                 current_caption_list.append(current_caption)
                 last_caption_list = current_caption_list
 
-            # Compute current multimodal embedding
             adv_image_features = self.clip_model.encode_image(adv_image_clip)
             adv_image_features = adv_image_features / adv_image_features.norm(dim=1, keepdim=True)
 
@@ -535,7 +433,6 @@ class COAAttack(BaseAttack):
             cur_text_features = self.clip_model.encode_text(cur_caption)
             cur_text_features = cur_text_features / cur_text_features.norm(dim=1, keepdim=True)
 
-            # Fuse current embedding
             if fusion_type == "cat":
                 cur_fused_embedding = torch.cat((adv_image_features, cur_text_features), dim=1)
                 cur_fused_embedding = cur_fused_embedding / cur_fused_embedding.norm(dim=1, keepdim=True)
@@ -546,46 +443,31 @@ class COAAttack(BaseAttack):
                 cur_fused_embedding = adv_image_features * cur_text_features
                 cur_fused_embedding = cur_fused_embedding / cur_fused_embedding.norm(dim=1, keepdim=True)
 
-            # Triplet-like loss
-            embedding_sim1 = torch.mean(torch.sum(cur_fused_embedding * cle_fused_embedding, dim=1))  # pos
-            embedding_sim2 = torch.mean(torch.sum(cur_fused_embedding * tgt_fused_embedding, dim=1))  # neg
+            # Triplet-like loss: pull toward clean, push toward target
+            embedding_sim1 = torch.mean(torch.sum(cur_fused_embedding * cle_fused_embedding, dim=1))
+            embedding_sim2 = torch.mean(torch.sum(cur_fused_embedding * tgt_fused_embedding, dim=1))
 
             p_neg = self.config.p_neg
             margin = 1 - p_neg
             loss = torch.mean(torch.relu(embedding_sim2 - p_neg * embedding_sim1 + margin))
             loss.backward()
 
-            # PGD step
             grad = delta.grad.detach()
             d = torch.clamp(delta + alpha * torch.sign(grad), min=-epsilon, max=epsilon)
             delta.data = d
             delta.grad.zero_()
 
-            # Log progress every 20 steps
             if j % 20 == 0:
                 print(f"  PGD step {j}/{self.config.max_iterations}: loss={loss.item():.4f}, caption={current_caption_list[0][:50]}")
 
-        # Return adversarial image (remove batch dimension)
         adv_image_final = image_org + delta
         adv_image_final = torch.clamp(adv_image_final, 0, 255)
-        return adv_image_final.squeeze(0).cpu()  # Move to CPU for PIL conversion
+        return adv_image_final.squeeze(0).cpu()
 
     def generate(self, model, sample: Sample, **kwargs) -> AttackResult:
-        """
-        Generate CoA adversarial example.
-
-        Args:
-            model: VLM model wrapper
-            sample: Sample with clean image
-            **kwargs: Additional parameters (e.g., target_image, target_caption)
-
-        Returns:
-            AttackResult with adversarial image
-        """
-        # Initialize models on first call
+        """Generate a CoA adversarial example for the given sample."""
         self._initialize_models()
 
-        # Build CoADataset lazily on first call
         if not hasattr(self, "_coa_dataset"):
             self._coa_dataset = CoADataset(
                 clean_images_dir=self.config.clean_images_dir,
@@ -600,7 +482,6 @@ class COAAttack(BaseAttack):
         if sample_idx is None:
             raise ValueError("CoA attack requires sample_idx in kwargs")
 
-        # Get sample from CoA dataset
         coa_sample = coa_dataset[sample_idx]
 
         # Resize to CLIP input resolution before attack (legacy behavior)
@@ -615,16 +496,13 @@ class COAAttack(BaseAttack):
         clean_img = resize_transform(clean_img)
         target_img = resize_transform(target_img)
 
-        # Convert PIL images to tensors [C, H, W] in [0, 255]
         clean_tensor = torch.from_numpy(np.array(clean_img)).permute(2, 0, 1).float()
         target_tensor = torch.from_numpy(np.array(target_img)).permute(2, 0, 1).float()
 
-        # Get captions (generate automatically if needed)
         clean_caption = coa_sample.get("clean_caption")
         target_caption = coa_sample.get("target_caption")
 
-        # Use source/target labels directly — short, concept-focused, matches COCO caption
-        # style and fits cleanly in CLIP's 77-token context window
+        # Prefer source/target labels: short, concept-focused, fit CLIP's 77-token window
         if not clean_caption or clean_caption == "":
             clean_caption = (
                 sample.metadata.get("source_label")
@@ -646,7 +524,6 @@ class COAAttack(BaseAttack):
                 target_caption = self._generate_target_caption(coa_sample["target_image_path"])
 
         # Truncate captions to fit CLIP's 77-token context length
-        # CLIP tokenizer allows 77 tokens; truncate via tokenizer to be safe
         _tok = self.clip_module.tokenize
         for _try_len in (200, 120, 60, 30):
             try:
@@ -663,7 +540,6 @@ class COAAttack(BaseAttack):
             except RuntimeError:
                 continue
 
-        # Run attack
         print(f"\nRunning CoA attack on {coa_sample['image_name']}")
         print(f"  Clean caption: {clean_caption}")
         print(f"  Target caption: {target_caption}")
@@ -675,14 +551,11 @@ class COAAttack(BaseAttack):
             target_caption,
         )
 
-        # Convert back to PIL Image
         adv_image = Image.fromarray(adv_tensor.permute(1, 2, 0).byte().cpu().numpy())
 
-        # Compute perturbation norm
         perturbation = (adv_tensor - clean_tensor).abs()
         perturbation_norm = perturbation.max().item()
 
-        # Save generated captions if any were created
         if self.captions_modified:
             if self.config.clean_images_dir and self.config.clean_captions_path:
                 self.save_captions(self.config.clean_images_dir, self.config.clean_captions_path)
@@ -693,18 +566,16 @@ class COAAttack(BaseAttack):
                     captions_cache=self.target_captions_cache,
                 )
 
-        # Get original output (if model provided)
         original_output = ""
         adversarial_output = ""
 
-        # Return result
         return AttackResult(
-            success=True,  # CoA is transfer attack, success determined downstream
+            success=True,  # transfer attack; success determined downstream
             adversarial_sample=adv_image,
             original_output=original_output,
             adversarial_output=adversarial_output,
             perturbation_norm=perturbation_norm,
-            queries=0,  # Transfer attack, no queries
+            queries=0,
             metadata={
                 "attack": "coa",
                 "clean_caption": clean_caption,
@@ -715,7 +586,3 @@ class COAAttack(BaseAttack):
                 "target_caption_auto": target_caption in self.target_captions_cache.values(),
             },
         )
-
-    def is_gradient_based(self) -> bool:
-        """CoA is a gradient-based PGD attack."""
-        return True

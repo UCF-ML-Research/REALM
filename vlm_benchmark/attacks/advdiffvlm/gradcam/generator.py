@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn.functional as F
-from torchvision import models, transforms
+from torchvision import models
 from PIL import Image
 
 
@@ -18,20 +18,17 @@ class GradCAMGenerator:
         self.device = device
         self.resolution = resolution
 
-        # Load ResNet50
         weights = models.ResNet50_Weights.DEFAULT
         self.model = models.resnet50(weights=weights)
         self.model.to(device)
         self.model.eval()
 
-        # Register forward hook
         self.features = {}
         self.gradients = {}
         layer = getattr(self.model, layer_name)
         layer.register_forward_hook(self._forward_hook)
         layer.register_full_backward_hook(self._backward_hook)
 
-        # Preprocessing
         self.preprocess = weights.transforms()
 
     def _forward_hook(self, module, input, output):
@@ -48,26 +45,21 @@ class GradCAMGenerator:
         class_label: int
     ) -> torch.Tensor:
         """Generate GradCAM mask for image at 64×64 resolution."""
-        # Preprocess
         img_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
         img_tensor.requires_grad_(True)
 
-        # Forward pass
         self.model.zero_grad()
         logits = self.model(img_tensor)
 
-        # Backward from target class
         target = logits[0, class_label]
         target.backward()
 
-        # Compute GradCAM
         features = self.features['value']
         gradients = self.gradients['value']
         weights = torch.mean(gradients, dim=(2, 3), keepdim=True)
         cam = torch.sum(weights * features, dim=1, keepdim=True)
         cam = F.relu(cam)
 
-        # Resize to 64×64
         cam = F.interpolate(
             cam,
             size=(self.resolution, self.resolution),
@@ -75,7 +67,6 @@ class GradCAMGenerator:
             align_corners=False
         )
 
-        # Normalize [0, 1]
         cam = cam.squeeze()
         cam = cam - cam.min()
         cam = cam / (cam.max() + 1e-6)

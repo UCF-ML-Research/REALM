@@ -1,10 +1,4 @@
-"""
-Vision backend adapters for ADVEDM optimization.
-
-This module provides a unified interface so ADVEDM-R can run either with:
-- CLIP visual encoder (baseline/surrogate)
-- Target VLM vision tower (paper-oriented path)
-"""
+"""Vision backend adapters for ADVEDM optimization."""
 
 from __future__ import annotations
 
@@ -37,11 +31,7 @@ def _openai_clip_forward_to_ln_post(
     vision_encoder: torch.nn.Module,
     image_normalized: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    Shared forward pass for OpenAI-CLIP style ViT up to (and including) ln_post.
-
-    Returns pre-projection hidden states [B, 1+N, D] (CLS at index 0, then patches).
-    """
+    """Shared forward pass for OpenAI-CLIP style ViT up to (and including) ln_post."""
     conv1_dtype = vision_encoder.conv1.weight.dtype
     x = vision_encoder.conv1(image_normalized.to(conv1_dtype))
     x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)
@@ -59,23 +49,19 @@ def _openai_clip_forward_to_ln_post(
     x = vision_encoder.transformer(x)
     x = x.permute(1, 0, 2)
     x = vision_encoder.ln_post(x)
-    return x  # [B, 1+N, D_inner]  (e.g. 1025 × 1024 for ViT-L/14@336px)
+    return x
 
 
 def _extract_openai_clip_patch_cls(
     vision_encoder: torch.nn.Module,
     image_normalized: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Extract PROJECTED patch/CLS embeddings (768-dim) for OpenAI-CLIP style ViT modules.
-
-    Used for text-image alignment (masking, L_cls).
-    """
+    """Extract PROJECTED patch/CLS embeddings (768-dim) for OpenAI-CLIP style ViT modules."""
     x = _openai_clip_forward_to_ln_post(vision_encoder, image_normalized)
     if getattr(vision_encoder, "proj", None) is not None:
         x = x @ vision_encoder.proj
 
-    # Upcast to float32 before normalization: float16 forward with gradients
-    # can produce NaN in CLS token during optimization (same fix as CLIPContrastiveEncoder).
+    # Upcast to float32 before normalization to avoid NaN in CLS token under float16 gradients.
     cls_embed = F.normalize(x[:, 0, :].float(), dim=-1, eps=_COS_EPS)
     patch_embeds = F.normalize(x[:, 1:, :].float(), dim=-1, eps=_COS_EPS)
     return patch_embeds, cls_embed
@@ -85,13 +71,8 @@ def _extract_openai_clip_patch_cls_noproj(
     vision_encoder: torch.nn.Module,
     image_normalized: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Extract PRE-PROJECTION patch/CLS embeddings (1024-dim) for spatial losses.
-
-    Used for L_p and L_fix when the target VLM (e.g. LLaVA) uses the pre-projection
-    hidden states rather than the CLIP contrastive projection output.
-    """
+    """Extract PRE-PROJECTION patch/CLS embeddings (1024-dim) for spatial losses."""
     x = _openai_clip_forward_to_ln_post(vision_encoder, image_normalized)
-    # No projection — return raw ln_post output
     cls_embed = F.normalize(x[:, 0, :].float(), dim=-1, eps=_COS_EPS)
     patch_embeds = F.normalize(x[:, 1:, :].float(), dim=-1, eps=_COS_EPS)
     return patch_embeds, cls_embed
@@ -102,11 +83,7 @@ def _forward_hf_style_vision(
     image_normalized: torch.Tensor,
     output_attentions: bool,
 ):
-    """
-    Forward helper for HF-style vision modules.
-
-    Tries both positional and keyword arg calling conventions.
-    """
+    """Forward helper for HF-style vision modules, trying positional then keyword args."""
     kwargs = {"output_attentions": output_attentions, "return_dict": True}
     try:
         return vision_encoder(image_normalized, **kwargs)
@@ -187,14 +164,7 @@ class ClipVisionBackend:
 
 
 class TargetVLMVisionBackend:
-    """
-    Target-VLM backend (paper-oriented ADVEDM-R path).
-
-    Notes:
-    - Uses target VLM vision tower for patch/attention extraction.
-    - Uses CLIP text encoder for text embeddings and optional projection
-      alignment when target tower outputs unprojected hidden states.
-    """
+    """Target-VLM backend (paper-oriented ADVEDM-R path)."""
 
     def __init__(
         self,
@@ -212,7 +182,6 @@ class TargetVLMVisionBackend:
         self.vision_encoder = self.vlm_encoder.vision_tower
         self.image_size = int(self.vlm_encoder.image_size)
 
-        # Use CLIP text encoder for Eq.3/5 text embeddings and optional projection.
         self.text_encoder = CLIPContrastiveEncoder(
             model_name=text_clip_model,
             device=device,
@@ -265,15 +234,10 @@ class TargetVLMVisionBackend:
         image: torch.Tensor,
         normalized: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Extract PRE-PROJECTION 1024-dim features for spatial losses (L_p, L_fix).
-
-        Returns the vision tower's raw hidden states without any contrastive projection,
-        matching the feature space that LLaVA's MLP projector actually receives.
-        """
+        """Extract PRE-PROJECTION 1024-dim features for spatial losses (L_p, L_fix)."""
         image_normalized = image if normalized else _normalize_clip(image)
         if self._is_openai_clip_like:
             return _extract_openai_clip_patch_cls_noproj(self.vision_encoder, image_normalized)
-        # HF-style tower (e.g. LLaVA's CLIPVisionModel): skip projection entirely
         return _extract_hf_patch_cls(self.vision_encoder, image_normalized, projection=None)
 
     def extract_cls_to_patch_attention(
@@ -285,10 +249,7 @@ class TargetVLMVisionBackend:
         try:
             return extract_cls_to_patch_attention_generic(self.vision_encoder, image_normalized)
         except Exception:
-            # Fallback: return uniform attention without any additional forward pass.
-            # extract_patch_cls_embeddings would be a full extra LLaVA forward pass just
-            # to obtain the shape — wasteful and OOM-prone during long optimization loops.
-            # Use the known image/patch dimensions from self instead.
+            # Fallback to uniform attention using known image/patch dimensions, avoiding an extra forward pass.
             B = image.shape[0]
             N = (self.image_size // self.patch_size) ** 2
             self.uses_fallback_attention = True
@@ -303,12 +264,7 @@ class TargetVLMVisionBackend:
         self,
         image_normalized: torch.Tensor,
     ) -> Optional[torch.Tensor]:
-        """
-        Provide projection for HF-style vision towers when available.
-
-        If hidden width matches CLIP visual projection input width, we reuse the
-        CLIP projection matrix to align patch features to text space.
-        """
+        """Provide projection for HF-style vision towers, reusing the CLIP projection when widths match."""
         if self._alignment_proj is None:
             return None
         if self._checked_hf_projection:

@@ -29,11 +29,7 @@ class VAttackConfig(AttackConfig):
 
 
 class VAttack(BaseAttack):
-    """V-Attack wrapper using BaseAttack interface.
-
-    Lazy-loads the CLIP ensemble on first generate() call (same pattern as MAttack/FOA).
-    source_text and target_text are set per-record by the generate pipeline.
-    """
+    """V-Attack wrapper that lazy-loads the CLIP ensemble on first generate() call."""
 
     def __init__(self, config: VAttackConfig):
         super().__init__(config)
@@ -83,7 +79,7 @@ class VAttack(BaseAttack):
         img = transform(pil_img)
         arr = np.array(img, dtype=np.uint8)
         tensor = torch.from_numpy(arr).permute(2, 0, 1).contiguous().float()
-        return tensor.unsqueeze(0)  # [1, C, H, W]
+        return tensor.unsqueeze(0)
 
     @staticmethod
     def _tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
@@ -99,7 +95,6 @@ class VAttack(BaseAttack):
         """Get source/target text from config or per-sample metadata."""
         target = self.config.target_text
         source = self.config.source_text
-        # Per-sample override from metadata (labels.json)
         if not target and sample.metadata.get("attack_target_text"):
             target = sample.metadata["attack_target_text"]
         if not source and sample.metadata.get("attack_source_text"):
@@ -117,20 +112,16 @@ class VAttack(BaseAttack):
         cfg = self.config
         device = cfg.device
 
-        # Prepare image
         pil_img = sample.images[0]
         image_org = self._prepare_image(pil_img).to(device)
 
-        # Source crop
         if cfg.use_source_crop:
             source_crop = transforms.RandomResizedCrop(cfg.input_res, scale=cfg.crop_scale)
         else:
             source_crop = torch.nn.Identity()
 
-        # Resolve per-sample text
         source_text, target_text = self._resolve_texts(sample)
 
-        # Encode texts
         source_text_enc = self._dict_to_list(
             self._ensemble_extractor.tforward([source_text])
         )
@@ -138,7 +129,6 @@ class VAttack(BaseAttack):
             self._ensemble_extractor.tforward([target_text])
         )
 
-        # Run PGD attack
         from .core.attacks import pgd_attack
         adv_tensor = pgd_attack(
             image_org=image_org,
@@ -173,6 +163,3 @@ class VAttack(BaseAttack):
                 "epsilon": cfg.epsilon,
             },
         )
-
-    def is_gradient_based(self) -> bool:
-        return True

@@ -1,6 +1,6 @@
 """FigStep attack configuration."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from ..base_attack import AttackConfig
@@ -37,18 +37,6 @@ def add_cli_args(parser):
 
 def resolve_generate_kwargs(attack_name, args):
     return {"device": args.device}
-
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import EVAL_QUERY
-    target = getattr(config, "target_text", None) or "unknown"
-    return {
-        "description": f"FigStep: {target}",
-        "reference_text": f"A {target} is visible",
-        "target_image": None,
-        "evaluation_query": EVAL_QUERY,
-    }
-
 
 @dataclass
 class FigStepConfig(AttackConfig):

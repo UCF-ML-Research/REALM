@@ -10,6 +10,9 @@
 
 set -uo pipefail
 
+# Use the same Python as the installer (falls back to python3 on PATH).
+PYBIN="${PYTHON:-python3}"
+
 # ─── Args ────────────────────────────────────────────────────────────────────
 MODE="default"   # default | check | download-all | delete
 for arg in "$@"; do
@@ -34,7 +37,7 @@ AD_TORCH="${VLM}/attacks/advdiffvlm/data/torch_cache/hub/checkpoints"
 COA_ASSET="${VLM}/attacks/coa/assets"
 AA_CKPT="${VLM}/attacks/anyattack/assets/checkpoints"
 
-DP_CKPT="${VLM}/defense/diffpure/assets/pretrained/guided_diffusion"
+DP_CKPT="${VLM}/defense/freqpure/assets/pretrained/guided_diffusion"
 PAD_SAM="${VLM}/defense/pad/assets/models"
 
 HF_CACHE="${HF_HOME:-${HOME}/.cache/huggingface}/hub"
@@ -127,8 +130,17 @@ MISSING=0
 check_file() {
     # $1=label  $2=path  $3=expected_size (display only)
     if [[ -f "$2" ]]; then
+        # Treat empty/truncated files (failed downloads) as missing and remove them.
+        local bytes
+        bytes=$(stat -L -c%s "$2" 2>/dev/null || echo 0)
+        if [[ "$bytes" -lt 100000 ]]; then
+            echo -e "  ${RED}MISSING${NC}  $1  [corrupt/empty ${bytes}B — removing]"
+            rm -f "$2"
+            MISSING=$((MISSING + 1))
+            return 1
+        fi
         local actual
-        actual=$(du -sh "$2" 2>/dev/null | cut -f1)
+        actual=$(du -shL "$2" 2>/dev/null | cut -f1)
         echo -e "  ${GREEN}OK${NC}  $1  [${actual}]"
         return 0
     else
@@ -207,6 +219,12 @@ if [[ "$MODE" == "download-all" ]] || \
 fi
 
 if [[ "$MODE" == "download-all" ]] || \
+   ! check_file "SAM ViT-B" "${PP_CKPT}/sam_vit_b_01ec64.pth" "358 MB"; then
+    should_download && download_file "${PP_CKPT}/sam_vit_b_01ec64.pth" \
+        "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+fi
+
+if [[ "$MODE" == "download-all" ]] || \
    ! check_file "SEEM focal-l" "${PP_SOM}/seem_focall_v1.pt" "1.3 GB"; then
     should_download && download_file "${PP_SOM}/seem_focall_v1.pt" \
         "https://huggingface.co/xdecoder/SEEM/resolve/main/seem_focall_v1.pt"
@@ -241,13 +259,13 @@ _ad_clip_ok=1
 [[ "$MODE" != "download-all" ]] && {
     for clip_file in RN50.pt RN101.pt ViT-B-16.pt ViT-B-32.pt ViT-L-14.pt; do
         check_file "CLIP ${clip_file}" "${AD_CLIP}/${clip_file}" \
-            "$(python3 -c "d={'RN50.pt':'244 MB','RN101.pt':'279 MB','ViT-B-16.pt':'335 MB','ViT-B-32.pt':'338 MB','ViT-L-14.pt':'890 MB'}; print(d.get('${clip_file}','?'))" 2>/dev/null || echo '?')" \
+            "$("$PYBIN" -c "d={'RN50.pt':'244 MB','RN101.pt':'279 MB','ViT-B-16.pt':'335 MB','ViT-B-32.pt':'338 MB','ViT-L-14.pt':'890 MB'}; print(d.get('${clip_file}','?'))" 2>/dev/null || echo '?')" \
             || _ad_clip_ok=0
     done
 }
 
 if [[ "$MODE" == "download-all" ]] || [[ $_ad_clip_ok -eq 0 ]]; then
-    should_download && bash -c "python - <<'PY'
+    should_download && bash -c "$PYBIN - <<'PY'
 import clip, shutil
 from pathlib import Path
 cache = Path('${AD_CLIP}')
@@ -266,7 +284,7 @@ fi
 
 if [[ "$MODE" == "download-all" ]] || \
    ! check_file "ResNet50 (torchvision)" "${AD_TORCH}/resnet50-0676ba61.pth" "98 MB"; then
-    should_download && bash -c "python - <<'PY'
+    should_download && bash -c "$PYBIN - <<'PY'
 import torchvision.models as m, os
 os.environ['TORCH_HOME'] = '${VLM}/attacks/advdiffvlm/data/torch_cache'
 m.resnet50(pretrained=True)
@@ -299,21 +317,16 @@ echo "━━━ AnyAttack — decoder checkpoints ━━━━━━━━━━
 
 _aa_ok=1
 [[ "$MODE" != "download-all" ]] && {
-    for aa_file in coco_bi.pt coco_cos.pt flickr30k_bi.pt flickr30k_cos.pt pre-trained.pt snli_ve_cos.pt; do
-        check_file "AnyAttack ${aa_file}" "${AA_CKPT}/${aa_file}" "320 MB" || _aa_ok=0
-    done
+    check_file "AnyAttack coco_bi.pt" "${AA_CKPT}/coco_bi.pt" "320 MB" || _aa_ok=0
 }
 
 if [[ "$MODE" == "download-all" ]] || [[ $_aa_ok -eq 0 ]]; then
     should_download && {
         mkdir -p "${AA_CKPT}"
-        echo -e "  ${CYAN}→${NC} Downloading AnyAttack decoders from HuggingFace ..."
-        for aa_file in coco_bi.pt coco_cos.pt flickr30k_bi.pt flickr30k_cos.pt pre-trained.pt snli_ve_cos.pt; do
-            if [[ ! -f "${AA_CKPT}/${aa_file}" ]] || [[ "$MODE" == "download-all" ]]; then
-                wget -q --show-progress -O "${AA_CKPT}/${aa_file}" \
-                    "https://huggingface.co/Jiaming94/anyattack/resolve/main/${aa_file}"
-            fi
-        done
+        echo -e "  ${CYAN}→${NC} Downloading AnyAttack decoder (coco_bi) from HuggingFace ..."
+        # The default decoder; alternate decoders live under the same checkpoints/ path.
+        download_file "${AA_CKPT}/coco_bi.pt" \
+            "https://huggingface.co/jiamingzz/anyattack/resolve/main/checkpoints/coco_bi.pt"
     }
 fi
 
@@ -325,6 +338,23 @@ if [[ "$MODE" == "download-all" ]] || \
    ! check_file "256x256_diffusion_uncond.pt" "${DP_CKPT}/256x256_diffusion_uncond.pt" "2.1 GB"; then
     should_download && download_file "${DP_CKPT}/256x256_diffusion_uncond.pt" \
         "https://openaipublic.blob.core.windows.net/diffusion/jul-2021/256x256_diffusion_uncond.pt"
+fi
+
+# BlueSuffix uses the same 256x256 diffusion checkpoint — link to the freqpure copy
+# (avoids a second 2.1 GB download); fall back to downloading if the source is absent.
+BLUE_DIFF="${VLM}/defense/bluesuffix/assets/256x256_diffusion_uncond.pt"
+if [[ "$MODE" == "download-all" ]] || \
+   ! check_file "BlueSuffix 256x256_diffusion" "${BLUE_DIFF}" "2.1 GB"; then
+    if should_download; then
+        mkdir -p "$(dirname "${BLUE_DIFF}")"
+        if [[ -s "${DP_CKPT}/256x256_diffusion_uncond.pt" ]]; then
+            ln -sf "${DP_CKPT}/256x256_diffusion_uncond.pt" "${BLUE_DIFF}"
+            echo -e "  ${CYAN}→${NC} linked BlueSuffix diffusion to the freqpure copy"
+        else
+            download_file "${BLUE_DIFF}" \
+                "https://openaipublic.blob.core.windows.net/diffusion/jul-2021/256x256_diffusion_uncond.pt"
+        fi
+    fi
 fi
 
 # ─── 6. Defense — PAD ────────────────────────────────────────────────────────
@@ -372,7 +402,7 @@ echo "━━━ PA-Attack — open_clip ViT-L-14 (openai) ━━━━━━━�
 
 if [[ "$MODE" == "download-all" ]] || \
    ! check_file "CLIP ViT-L-14 (open_clip/openai)" "${CLIP_CACHE}/ViT-L-14.pt" "890 MB"; then
-    should_download && bash -c "python3 - <<'PY'
+    should_download && bash -c "$PYBIN - <<'PY'
 import open_clip
 print('  Downloading ViT-L-14 (openai) via open_clip ...')
 model, _, _ = open_clip.create_model_and_transforms('ViT-L-14', pretrained='openai')
@@ -381,9 +411,37 @@ print('  Done.')
 PY"
 fi
 
-# Prototypes are bundled at vlm_benchmark/attacks/paattack/prototypes/ (no download needed)
+# PA-Attack OOD prototypes — CLIP ViT-L-14 patch tokens of the bundled images.
+# Generated locally (no download) if missing.
 _pa_proto="${VLM}/attacks/paattack/prototypes/prototypes_tokens_3000_20_1024.pt"
-check_file "PA-Attack prototypes" "${_pa_proto}" "20 MB"
+if [[ "$MODE" == "download-all" ]] || ! check_file "PA-Attack prototypes" "${_pa_proto}" "20 MB"; then
+    if should_download; then
+        echo -e "  ${CYAN}→${NC} Generating PA-Attack prototypes (CLIP ViT-L-14 on bundled images) ..."
+        bash -c "$PYBIN - <<'PY'
+import torch, sys, open_clip
+from pathlib import Path
+from PIL import Image
+import torchvision.transforms as T
+sys.path.insert(0, '.')
+from vlm_benchmark.attacks.paattack.core.clip_vision import ClipVisionModel
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model, _, preprocess = open_clip.create_model_and_transforms('ViT-L-14', pretrained='openai')
+cvm = ClipVisionModel(model.visual, preprocess.transforms[-1]).to(device).eval()
+prep = T.Compose(preprocess.transforms[:-1])
+imgs = sorted(Path('dataset/nips2017/source').glob('*.png')) + sorted(Path('dataset/nips2017/target').glob('*.jpg'))
+protos = []
+for p in imgs[:200]:
+    x = prep(Image.open(p).convert('RGB')).unsqueeze(0).to(device)
+    with torch.no_grad():
+        _, tokens, _ = cvm(x, False, tokens=True, attention=True)
+    protos.append(tokens[0].detach().cpu().float())
+dest = Path('${_pa_proto}')
+dest.parent.mkdir(parents=True, exist_ok=True)
+torch.save(torch.stack(protos), dest)
+print('  generated', tuple(torch.stack(protos).shape))
+PY"
+    fi
+fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo ""

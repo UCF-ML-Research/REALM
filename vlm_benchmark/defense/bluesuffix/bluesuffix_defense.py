@@ -1,12 +1,4 @@
-"""BlueSuffix Defense Wrapper.
-
-Three-step defense (ICLR 2025):
-  1. Image Purifier  — Diffusion denoising (BlueSuffix's own diffusion core)
-  2. Text Purifier   — GPT-4o prompt rewriting
-  3. Suffix Generator — GPT-2 LoRA defensive suffix
-
-Each component can be independently enabled/disabled.
-"""
+"""BlueSuffix three-step defense: diffusion image purifier, text purifier, and suffix generator."""
 
 import os
 from dataclasses import dataclass
@@ -22,29 +14,24 @@ from ..base_defense import BaseDefense, DefenseConfig, DefenseResult
 @dataclass
 class BlueSuffixDefenseConfig(DefenseConfig):
     """BlueSuffix-specific configuration."""
-    # Component toggles
     enable_image_purifier: bool = True
     enable_text_purifier: bool = True
     enable_suffix_generator: bool = True
 
-    # Diffusion denoising params
     max_timesteps: str = "100"
     num_denoising_steps: str = "20"
     sampling_method: str = "ddim"
     diffusion_checkpoint: Optional[str] = None
 
-    # Suffix generator
     suffix_generator_dir: Optional[str] = None
 
-    # Text purifier
     openai_api_key: Optional[str] = None
     text_purifier_model: str = "gpt-4o"
 
-    # Device
     device: str = "cuda:0"
 
     def __post_init__(self):
-        # Parse string booleans from CLI
+        # Parse string booleans coming from the CLI.
         for field_name in ("enable_image_purifier", "enable_text_purifier", "enable_suffix_generator"):
             val = getattr(self, field_name)
             if isinstance(val, str):
@@ -60,10 +47,6 @@ class BlueSuffixDefense(BaseDefense):
         self._purification_forward = None
         self._suffix_model = None
         self._suffix_tokenizer = None
-
-    def requires_model(self) -> bool:
-        """BlueSuffix does not require a VLM."""
-        return False
 
     def _initialize_image_purifier(self):
         """Lazy load BlueSuffix's diffusion model (own core copy)."""
@@ -124,20 +107,11 @@ class BlueSuffixDefense(BaseDefense):
         print("BlueSuffix suffix generator loaded")
 
     def clean(self, image_path: str, **kwargs) -> DefenseResult:
-        """Clean adversarial image using BlueSuffix three-step defense.
-
-        Args:
-            image_path: Path to adversarial image
-            **kwargs:
-                prompt: Text prompt to purify and append suffix to
-
-        Returns:
-            DefenseResult with cleaned image and metadata including final_prompt
-        """
+        """Clean an adversarial image using the BlueSuffix three-step defense."""
         prompt = kwargs.get("prompt")
         steps_applied = []
 
-        # ── Step 1: Image Purifier ──
+        # Step 1: Image Purifier
         purified_pil = None
         if self.config.enable_image_purifier:
             self._initialize_image_purifier()
@@ -164,7 +138,7 @@ class BlueSuffixDefense(BaseDefense):
             purified_pil = Image.open(image_path).convert("RGB")
             original_size = purified_pil.size
 
-        # ── Step 2: Text Purifier ──
+        # Step 2: Text Purifier
         purified_prompt = prompt
         if self.config.enable_text_purifier and prompt is not None:
             api_key = self.config.openai_api_key or os.environ.get("OPENAI_API_KEY")
@@ -178,9 +152,8 @@ class BlueSuffixDefense(BaseDefense):
                 except Exception as e:
                     print(f"[BlueSuffix] Text purifier failed, using original prompt: {e}")
                     purified_prompt = prompt
-            # else: silently skip — no API key
 
-        # ── Step 3: Suffix Generator ──
+        # Step 3: Suffix Generator
         suffix = ""
         if self.config.enable_suffix_generator and prompt is not None:
             self._initialize_suffix_generator()
@@ -192,7 +165,6 @@ class BlueSuffixDefense(BaseDefense):
             )
             steps_applied.append("suffix_generator")
 
-        # Build final prompt
         final_prompt = prompt
         if prompt is not None:
             base = purified_prompt if purified_prompt is not None else prompt

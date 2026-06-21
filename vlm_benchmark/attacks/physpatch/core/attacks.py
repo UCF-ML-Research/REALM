@@ -11,12 +11,7 @@ from .transforms import My_T
 
 
 def set_environment(seed=42):
-    """
-    Set random seeds for reproducibility.
-
-    Args:
-        seed: Random seed value
-    """
+    """Set random seeds for reproducibility."""
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
     np.random.seed(seed)
@@ -31,27 +26,7 @@ def pgd(
     source_crop, target_crop, center=None,
     num_iters=10, epsilon=8, alpha=1.0, decay=1.0, device='cuda'
 ):
-    """
-    Projected Gradient Descent (PGD) attack for physical adversarial patches.
-
-    Args:
-        image_tensor: Clean image tensor (B, C, H, W)
-        tgt_tensor: Target image tensor (B, C, H, W)
-        ensemble_extractor: Ensemble of feature extractors
-        ensemble_loss: Ensemble loss function
-        source_crop: Crop function for source (adversarial) image
-        target_crop: Crop function for target image
-        center: Normalized patch center coordinates (B, 2) in [-1, 1]
-        num_iters: Number of optimization iterations
-        epsilon: L-infinity perturbation budget (in [0, 255] scale)
-        alpha: Step size for gradient updates
-        decay: Momentum decay (unused in PGD)
-        device: Device to run on
-
-    Returns:
-        final_image: Adversarial image with patch applied
-        final_patch: Final patch tensor
-    """
+    """PGD attack for physical adversarial patches."""
     set_environment(42)
     init_patch = image_tensor.clone().detach().to(device)
     print("patch:", torch.min(init_patch), torch.max(init_patch), init_patch.shape)
@@ -65,7 +40,7 @@ def pgd(
     threshold_list = [round(min(0.6 + i * 0.02, 0.95), 6) for i in range(num_iters)]
     mask_expanded = torch.ones([1, 1, H, W]).to(device)
     trans = My_T(num_copies=1)
-    # Scale threshold proportionally to image area (120*120 is for 900x1600)
+    # Threshold scaled to image area (120*120 baseline is for 900x1600)
     th = int(H * W * (120 * 120) / (900 * 1600))
     for iter in range(num_iters):
         with torch.no_grad():

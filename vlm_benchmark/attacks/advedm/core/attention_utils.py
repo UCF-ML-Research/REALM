@@ -1,9 +1,4 @@
-"""
-Attention utilities used by paper-faithful ADVEDM implementations.
-
-This module intentionally keeps only the vector-form attention operations used
-by the current ADVEDM-A / ADVEDM-R pipelines.
-"""
+"""Vector-form attention utilities used by the ADVEDM-A / ADVEDM-R pipelines."""
 
 import torch
 import torch.nn.functional as F
@@ -14,20 +9,12 @@ def _extract_cls_to_patch_from_attentions(
     average_across_layers: bool = True,
     renormalize: bool = False,
 ) -> torch.Tensor:
-    """
-    Convert layer attentions to CLS->patch vector [B, N].
-
-    Args:
-        attentions: Sequence of [B, heads, seq, seq] tensors.
-        average_across_layers: Average over all layers if True; else use last.
-        renormalize: Re-normalize vector to sum to 1 if True.
-    """
+    """Convert layer attentions to a CLS->patch vector [B, N]."""
     if not attentions:
         raise ValueError("No attention tensors were provided.")
 
     cls_vectors = []
     for layer_attn in attentions:
-        # Mean over heads: [B, seq, seq]
         attn_avg = layer_attn.mean(dim=1)
         cls_vectors.append(attn_avg[:, 0, 1:])
 
@@ -48,20 +35,7 @@ def extract_cls_to_patch_attention(
     average_across_layers: bool = True,
     renormalize: bool = False,
 ) -> torch.Tensor:
-    """
-    Extract CLS->patch attention as a vector per image.
-
-    Args:
-        vision_encoder: CLIP vision model (e.g., model.visual).
-        images_normalized: Preprocessed images [B, C, H, W].
-        average_across_layers: Average CLS->patch attention across all layers.
-            If False, use only the last layer.
-        renormalize: Optional implementation choice. If True, re-normalize the
-            extracted CLS->patch vector to sum to 1.
-
-    Returns:
-        Tensor [B, N] where N is the number of patch tokens.
-    """
+    """Extract CLS->patch attention as a vector per image from an OpenAI-CLIP-style tower."""
     device = images_normalized.device
     conv1_dtype = vision_encoder.conv1.weight.dtype
     images_norm = images_normalized.to(dtype=conv1_dtype, device=device)
@@ -140,13 +114,7 @@ def extract_cls_to_patch_attention_generic(
     average_across_layers: bool = True,
     renormalize: bool = False,
 ) -> torch.Tensor:
-    """
-    Generic CLS->patch attention extraction for both OpenAI-CLIP and HF-style towers.
-
-    Strategy:
-    1) OpenAI-CLIP style (conv1+transformer): use exact manual extraction.
-    2) HF-style modules: call forward(..., output_attentions=True) and aggregate.
-    """
+    """Generic CLS->patch attention extraction for both OpenAI-CLIP and HF-style towers."""
     if hasattr(vision_encoder, "conv1") and hasattr(vision_encoder, "transformer"):
         return extract_cls_to_patch_attention(
             vision_encoder,
@@ -163,13 +131,11 @@ def extract_cls_to_patch_attention_generic(
 
     attentions = getattr(outputs, "attentions", None)
     if attentions is None and isinstance(outputs, tuple) and len(outputs) > 0:
-        # Some models may return attentions as the last tuple element.
         maybe_attn = outputs[-1]
         if isinstance(maybe_attn, (list, tuple)):
             attentions = maybe_attn
 
-    # Filter out None entries: sdpa-backed models (e.g. LLaVA) silently ignore
-    # output_attentions=True and return a list of Nones instead of raising.
+    # sdpa-backed models (e.g. LLaVA) return a list of Nones; drop them.
     if attentions is not None:
         attentions = [a for a in attentions if a is not None]
 
@@ -191,18 +157,7 @@ def reallocate_attention_vector(
     mask: torch.Tensor,
     beta: float = 0.4,
 ) -> torch.Tensor:
-    """
-    Reallocate attention per Equation 10 in vector form.
-
-    Args:
-        A_orig: Clean image CLS->patch attention [B, N].
-        A_ref: Reference image CLS->patch attention [B, N].
-        mask: Binary mask [B, N], 0=inject/remove, 1=preserve.
-        beta: Reallocation scaling factor.
-
-    Returns:
-        Reallocated attention [B, N].
-    """
+    """Reallocate attention per Equation 10 in vector form."""
     if A_orig.shape != A_ref.shape or A_orig.shape != mask.shape:
         raise ValueError(
             f"Shape mismatch: A_orig={tuple(A_orig.shape)}, "
@@ -216,16 +171,7 @@ def compute_attention_weighted_features_vector(
     A_vec: torch.Tensor,
     patch_embeds: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    Compute attention-weighted patch embeddings A * [patch].
-
-    Args:
-        A_vec: Attention weights [B, N].
-        patch_embeds: Patch embeddings [B, N, D].
-
-    Returns:
-        Weighted patch features [B, N, D].
-    """
+    """Compute attention-weighted patch embeddings A * [patch]."""
     if A_vec.ndim != 2 or patch_embeds.ndim != 3:
         raise ValueError(
             f"Expected A_vec [B,N] and patch_embeds [B,N,D], got "

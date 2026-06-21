@@ -18,7 +18,7 @@ class DefenseConfig:
 @dataclass
 class DefenseResult:
     """Result from defense cleaning."""
-    cleaned_sample: Any              # PIL Image
+    cleaned_sample: Any
     original_image_path: str
     detection_confidence: float = 0.0
     regions_removed: int = 0
@@ -41,32 +41,5 @@ class BaseDefense(ABC):
 
     @abstractmethod
     def clean(self, image_path: str, **kwargs) -> DefenseResult:
-        """
-        Clean adversarial image.
-
-        Args:
-            image_path: Path to adversarial image
-            **kwargs: Additional defense-specific parameters
-
-        Returns:
-            DefenseResult with cleaned image and metadata
-        """
+        """Clean an adversarial image and return a DefenseResult."""
         pass
-
-    @abstractmethod
-    def requires_model(self) -> bool:
-        """
-        Return whether defense needs a VLM for cleaning.
-
-        Returns:
-            True if defense requires VLM, False otherwise
-        """
-        pass
-
-    def get_system_prompt(self) -> str | None:
-        """Return a hardened system prompt, or None to use the default.
-
-        Override in prompt-level defenses (e.g. SystemPromptDefense).
-        Image-purification defenses leave this as None.
-        """
-        return None

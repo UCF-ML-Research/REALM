@@ -1,34 +1,5 @@
 #!/usr/bin/env python3
-"""
-Evaluate adversarial images against a VLM.
-
-Queries a vllm server with adversarial (and optionally clean) images, then
-computes Attack Success Rate (ASR).
-
-Usage:
-    # Per-pair labels + VLM judge (recommended for nips2017)
-    python scripts/evaluate_adversarial.py \
-        --attack_dirs /tmp/out_foa \
-        --question "What is the main object in this image?" \
-        --labels_json dataset/nips2017/labels.json \
-        --judge vlm \
-        --model Qwen/Qwen2.5-VL-7B-Instruct
-
-    # Single global target + substring matching
-    python scripts/evaluate_adversarial.py \
-        --attack_dirs /tmp/out_foa \
-        --question "What is the main object in this image?" \
-        --target_text "stop sign" \
-        --model Qwen/Qwen2.5-VL-7B-Instruct
-
-    # Multiple attacks, save results
-    python scripts/evaluate_adversarial.py \
-        --attack_dirs /tmp/out_foa /tmp/out_mattack \
-        --question "Describe the main object." \
-        --labels_json dataset/nips2017/labels.json \
-        --judge vlm --model Qwen/Qwen2.5-VL-7B-Instruct \
-        -o /tmp/eval_results
-"""
+"""Evaluate adversarial images against a VLM and compute Attack Success Rate."""
 
 from __future__ import annotations
 
@@ -114,11 +85,7 @@ def query_vlm(client: OpenAI, model: str, image_paths: list[Path],
 def run_queries(client: OpenAI, model: str, items: list[dict],
                 question: str, max_tokens: int, workers: int,
                 label: str) -> list[dict]:
-    """Query VLM concurrently.
-
-    Each item has 'id' and either 'image' (Path) or 'images' (list[Path]).
-    Items may also carry a per-sample 'question' override.
-    """
+    """Query the VLM concurrently over a list of items."""
     if not items:
         return []
     results = []
@@ -183,7 +150,6 @@ def vlm_judge(client: OpenAI, model: str, response: str,
             max_tokens=32, temperature=0.0,
         )
         answer = resp.choices[0].message.content or ""
-        # Strip thinking tags if present
         if "<think>" in answer:
             answer = re.sub(r"<think>.*?</think>\s*", "", answer, flags=re.DOTALL)
         if "<think>" in answer:
@@ -378,12 +344,10 @@ def save_results(out_dir: Path, model: str, question: str, target_text: str | No
             for name in asrs
         },
     }
-    # Save combined results
     p = out_dir / "eval_results.json"
     p.write_text(json.dumps(result, indent=2, ensure_ascii=False))
     print(f"Saved {p}")
 
-    # Save per-attack results
     per_attack_dir = out_dir / "per_attack"
     per_attack_dir.mkdir(parents=True, exist_ok=True)
     for name in asrs:
@@ -412,7 +376,6 @@ _VLLM_STARTUP_TIMEOUT = 600
 _START_VLM_SERVER_SH = Path(__file__).resolve().parent.parent / "agent" / "start_vlm_server.sh"
 _LOGDIR = Path("/orange/qi855292.ucf/yi217029.ucf/Red_Teaming/logs")
 
-# Model name → start_vlm_server.sh key mapping
 _MODEL_KEY_MAP = {
     "Qwen/Qwen2.5-VL-3B-Instruct": "qwen25vl3b",
     "Qwen/Qwen3-VL-4B-Instruct": "qwen3vl4b",
@@ -453,8 +416,7 @@ def _wait_for_port(port: int, timeout: int = _VLLM_STARTUP_TIMEOUT) -> bool:
 
 def start_vllm_server(model: str, name: str = "eval",
                       gpu_mem_util: float = 0.95, device: str = "cuda") -> tuple:
-    """Launch a vLLM server with proper conda env.
-    Returns (process, url)."""
+    """Launch a vLLM server in the proper conda env; returns (process, url)."""
     import atexit, subprocess, os
 
     port = _find_free_port()
@@ -468,7 +430,6 @@ def start_vllm_server(model: str, name: str = "eval",
     else:
         gpu_id = "0"
 
-    # Models needing --trust-remote-code
     trust_remote = any(k in model for k in ["InternVL", "Cosmos", "internvl", "cosmos"])
     extra = "--trust-remote-code" if trust_remote else ""
 
@@ -565,7 +526,6 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Auto-start victim VLM server if not provided
     _vlm_proc = None
     if not args.server_url:
         _vlm_proc, args.server_url = start_vllm_server(
@@ -582,7 +542,7 @@ def main():
         import os
         openai_key = os.environ.get("OPENAI_API_KEY")
         if openai_key:
-            # Use OpenAI API for judge (faster, no second GPU server needed)
+            # OpenAI API judge avoids a second GPU server
             args.judge_url = "https://api.openai.com"
             args.judge_model = "gpt-4o-mini"
             args.api_key = openai_key
@@ -593,7 +553,6 @@ def main():
                 gpu_mem_util=0.15, device=args.device,
             )
 
-    # Load per-pair labels or use global target
     labels = None
     target_text = args.target_text
     if args.labels_json:
@@ -603,7 +562,6 @@ def main():
         if lp and Path(lp).exists():
             labels = load_labels(lp)
 
-    # Load attack directories
     attacks = {}
     manifest_question = None
     for d in args.attack_dirs:
@@ -611,7 +569,6 @@ def main():
             data = load_attack_dir(d)
             name = data.get("attack", Path(d).name)
             attacks[name] = data["valid_results"]
-            # Pick up question from first sample that has one
             if manifest_question is None:
                 for r in data["valid_results"]:
                     if r.get("question"):
@@ -623,7 +580,6 @@ def main():
     if not attacks:
         sys.exit("No valid attack directories found.")
 
-    # Resolve question: CLI flag > manifest > error
     question = args.question or manifest_question
     if not question:
         sys.exit("ERROR: --question not provided and no question found in manifests")
@@ -639,7 +595,6 @@ def main():
 
     client = OpenAI(base_url=f"{args.server_url}/v1", api_key=args.api_key)
 
-    # Separate client for judge (may be a different server)
     if args.judge == "vlm" and args.judge_url:
         judge_client = OpenAI(base_url=f"{args.judge_url}/v1", api_key=args.api_key)
         judge_model = args.judge_model
@@ -647,7 +602,6 @@ def main():
         judge_client = client
         judge_model = args.model
 
-    # Collect clean source images (deduplicated across attacks)
     ds_src = DATASETS.get(args.dataset, {}).get("source") if args.dataset else None
     clean_paths = {}  # id -> Path
     for results in attacks.values():
@@ -663,7 +617,6 @@ def main():
                         break
             clean_paths[r["id"]] = src
 
-    # Phase 1: Clean baseline
     clean_responses = []
     clean_rate = None
     clean_resp_map = {}
@@ -680,7 +633,6 @@ def main():
         print(f"  Baseline: {clean_rate['rate']*100:.1f}% "
               f"({clean_rate['n_match']}/{clean_rate['n_total']}) [{time.time()-t0:.1f}s]")
 
-    # Phase 2: Attack evaluation
     print(f"\nPhase 2: Attack evaluation ({args.judge} judge)")
     attack_responses = {}
     attack_asrs = {}
@@ -724,7 +676,6 @@ def main():
         mr_str = f"  MR={mr['mr']*100:.1f}%" if mr else ""
         print(f"  {name}: ASR={asr['asr']*100:.1f}% ({asr['n_match']}/{asr['n_total']}){mr_str} [{timing}]")
 
-    # Phase 3: Summary
     print_summary(clean_rate, attack_asrs, attack_mrs, target_text, args.judge, labels)
 
     for name, resp in attack_responses.items():
@@ -733,7 +684,6 @@ def main():
                         attack_asrs[name].get("details"), args.max_show)
         print()
 
-    # Phase 4: Save
     if args.output:
         save_results(Path(args.output), args.model, question, target_text,
                      clean_responses, attack_responses, clean_rate, attack_asrs,

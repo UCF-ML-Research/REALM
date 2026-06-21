@@ -31,16 +31,7 @@ class DefenseRegistry:
 
     @classmethod
     def create(cls, name: str, **config_kwargs) -> BaseDefense:
-        """
-        Create defense instance.
-
-        Args:
-            name: Defense name
-            **config_kwargs: Configuration parameters
-
-        Returns:
-            Defense instance
-        """
+        """Create a defense instance by name with the given config parameters."""
         if name not in cls._registry:
             available = list(cls._registry.keys())
             raise ValueError(
@@ -53,24 +44,6 @@ class DefenseRegistry:
         return spec.defense_class(config)
 
     @classmethod
-    def list_defenses(cls, category: Optional[str] = None) -> List[str]:
-        """
-        List registered defenses.
-
-        Args:
-            category: Optional category filter
-
-        Returns:
-            List of defense names
-        """
-        if category:
-            return [
-                n for n, s in cls._registry.items()
-                if s.category == category
-            ]
-        return list(cls._registry.keys())
-
-    @classmethod
     def get_spec(cls, name: str) -> DefenseSpec:
         """Get defense specification."""
         if name not in cls._registry:
@@ -79,12 +52,7 @@ class DefenseRegistry:
 
     @classmethod
     def get_all_cli_arguments(cls) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Get CLI arguments for all registered defenses.
-
-        Returns:
-            Dict mapping defense name to list of CLI argument specs
-        """
+        """Return a mapping of defense name to its CLI argument specs."""
         return {
             name: spec.cli_arguments
             for name, spec in cls._registry.items()
@@ -96,7 +64,6 @@ def register_all_defenses():
     from .pad.pad_defense import PADDefense, PADDefenseConfig
     from .pad.config import CLI_ARGUMENTS as PAD_CLI_ARGS
 
-    # PAD registration
     DefenseRegistry.register(DefenseSpec(
         name="pad",
         category="purification",
@@ -112,7 +79,6 @@ def register_all_defenses():
         cli_arguments=PAD_CLI_ARGS,
     ))
 
-    # FreqPure registration
     from .freqpure.freqpure_defense import FreqPureDefense, FreqPureDefenseConfig
     from .freqpure.config import CLI_ARGUMENTS as FREQPURE_CLI_ARGS
 
@@ -122,9 +88,7 @@ def register_all_defenses():
         defense_class=FreqPureDefense,
         config_class=FreqPureDefenseConfig,
         cli_params=[
-            # FreqPure-unique params
             "amplitude_cut_range", "phase_cut_range", "delta", "forward_noise_steps",
-            # Shared diffusion params (defined in freqpure/config.py CLI_ARGUMENTS)
             "max_timesteps", "num_denoising_steps", "sampling_method",
         ],
         defaults={
@@ -139,21 +103,6 @@ def register_all_defenses():
         cli_arguments=FREQPURE_CLI_ARGS,
     ))
 
-    # SystemPrompt registration
-    from .systemprompt.systemprompt_defense import SystemPromptDefense, SystemPromptDefenseConfig
-    from .systemprompt.config import CLI_ARGUMENTS as SYSTEMPROMPT_CLI_ARGS
-
-    DefenseRegistry.register(DefenseSpec(
-        name="systemprompt",
-        category="prompt",
-        defense_class=SystemPromptDefense,
-        config_class=SystemPromptDefenseConfig,
-        cli_params=[],
-        defaults={},
-        cli_arguments=SYSTEMPROMPT_CLI_ARGS,
-    ))
-
-    # BlueSuffix registration
     from .bluesuffix.bluesuffix_defense import BlueSuffixDefense, BlueSuffixDefenseConfig
     from .bluesuffix.config import CLI_ARGUMENTS as BLUESUFFIX_CLI_ARGS
 
@@ -163,11 +112,8 @@ def register_all_defenses():
         defense_class=BlueSuffixDefense,
         config_class=BlueSuffixDefenseConfig,
         cli_params=[
-            # BlueSuffix-unique params
             "enable_image_purifier", "enable_text_purifier",
             "enable_suffix_generator", "openai_api_key",
-            # Shared diffusion params (defined in freqpure/config.py CLI_ARGUMENTS;
-            # registered here to avoid argparse duplicate-flag errors)
             "max_timesteps", "num_denoising_steps", "sampling_method",
         ],
         defaults={
@@ -179,25 +125,4 @@ def register_all_defenses():
             "sampling_method": "ddim",
         },
         cli_arguments=BLUESUFFIX_CLI_ARGS,
-    ))
-
-    # RobustCLIP (FARE + LEAF) registration
-    from .robustclip.robustclip_defense import RobustCLIPDefense, RobustCLIPDefenseConfig
-    from .robustclip.config import CLI_ARGUMENTS as ROBUSTCLIP_CLI_ARGS
-
-    DefenseRegistry.register(DefenseSpec(
-        name="robustclip",
-        category="encoder",
-        defense_class=RobustCLIPDefense,
-        config_class=RobustCLIPDefenseConfig,
-        cli_params=[
-            "clip_model_name", "hf_model_id", "local_checkpoint",
-            "encoder_mode",
-        ],
-        defaults={
-            "clip_model_name": "ViT-L-14",
-            "hf_model_id": "LEAF-CLIP/CLIP-ViT-L-rho50-k1-constrained-FARE2",
-            "encoder_mode": "both",
-        },
-        cli_arguments=ROBUSTCLIP_CLI_ARGS,
     ))

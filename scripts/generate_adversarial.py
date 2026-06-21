@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""
-Generate adversarial images using any registered attack.
-
-Usage:
-    python scripts/generate_adversarial.py foa --dataset nips2017 -o out/
-    python scripts/generate_adversarial.py vattack --dataset nips2017 --target_text "stop sign" -o out/
-    python scripts/generate_adversarial.py foa --source imgs/ --target targets/ -o out/
-"""
+"""Generate adversarial images using any registered attack."""
 
 from __future__ import annotations
 
@@ -27,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from vlm_benchmark.attacks.registry import register_all_attacks, AttackRegistry
 from vlm_benchmark.data.base_dataset import Sample
+from vlm_benchmark.data import Nips2017Dataset
+
+DATASET_CLASSES = {"nips2017": Nips2017Dataset}
 
 DATASET_ROOT = Path(__file__).resolve().parent.parent / "dataset"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -50,17 +46,16 @@ def _relpath(p):
 
 # ── Attack categories ────────────────────────────────────────────────────────
 
-STEM_TARGET_ATTACKS = {"foa", "mattack", "coa", "physpatch", "anyattack", "advedm"}
+STEM_TARGET_ATTACKS = {"foa", "mattack", "coa", "physpatch", "anyattack", "advedm", "imagemix"}
 IMGFOLDER_TARGET_ATTACKS = {"advdiffvlm"}
 IMAGE_ATTACKS = STEM_TARGET_ATTACKS | IMGFOLDER_TARGET_ATTACKS
 
 TEXT_GUIDED_ATTACKS = {"advedm_r", "vattack", "figstep", "promptinject"}
-UNTARGETED_ATTACKS = {"paattack", "corruption"}
+UNTARGETED_ATTACKS = {"paattack"}
 ALL_ATTACKS = sorted(IMAGE_ATTACKS | TEXT_GUIDED_ATTACKS | UNTARGETED_ATTACKS)
 
 _CONFIG_MODULE = {"advedm_r": "advedm"}
 
-# Attacks that produce lossless PNG output
 _PNG_ATTACKS = {"advedm", "advedm_r", "advdiffvlm", "anyattack", "paattack"}
 
 
@@ -139,14 +134,12 @@ def _vlm_chat(client, model: str, prompt: str, max_tokens: int = 256) -> str:
         resp = client.chat.completions.create(
             model=model,
             messages=[
-                # Disable thinking mode for Qwen3 — we need short, direct outputs
                 {"role": "system", "content": "You are a concise assistant. /no_think"},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=max_tokens, temperature=0.0,
         )
         text = resp.choices[0].message.content or ""
-        # Strip thinking tags if model ignores /no_think
         if "<think>" in text:
             text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
         if "<think>" in text:
@@ -162,11 +155,7 @@ def smart_resolve_target(target_text: str, attack_name: str,
                          level: str = "instruction",
                          source_text: str = "",
                          question: str = "") -> tuple[str, str | None]:
-    """Use a VLM to generate context-aware injection text.
-
-    No normalization — target_text is passed through unchanged.
-    Returns (target_text, injection_text_or_None).
-    """
+    """Use a VLM to generate context-aware injection text; returns (target_text, injection_or_None)."""
     if not vlm_url:
         return target_text, None
 
@@ -177,7 +166,6 @@ def smart_resolve_target(target_text: str, attack_name: str,
 
     injection = None
     if attack_name == "figstep":
-        # No source context — annotation should be a clean label about the target only
         injection = _vlm_chat(
             client, vlm_model,
             f"Generate a realistic image annotation label.\n\n"
@@ -212,7 +200,7 @@ def smart_resolve_target(target_text: str, attack_name: str,
 # ── Attack creation ──────────────────────────────────────────────────────────
 
 def create_attack(name: str, args, source_images: list[Path]):
-    """Create attack by delegating kwargs to its config.resolve_cli_kwargs()."""
+    """Create an attack, delegating kwargs to its config.resolve_cli_kwargs()."""
     context = {
         "source_dir": str(Path(args.source).parent) if Path(args.source).is_file() else str(args.source),
         "output_dir": str(args.output),
@@ -240,31 +228,22 @@ def parse_args():
     p.add_argument("--max_samples", type=int, help="Max images to process")
     p.add_argument("--device", default="cuda")
 
-    # Shared perturbation parameters
     p.add_argument("--epsilon", type=float, help="Perturbation budget (scale is attack-specific)")
     p.add_argument("--steps", type=int, help="Optimization steps")
     p.add_argument("--alpha", type=float, help="Step size / mix ratio")
 
-    # Image attacks
     p.add_argument("--target", help="Target image file or directory")
     p.add_argument("--coords_file", help="Coordinates file (physpatch)")
-    p.add_argument("--corruption_mode", default="fog",
-                   choices=["brightness", "fog", "lowlight", "motionblur", "watersplash", "saturate"],
-                   help="Corruption type (default: fog)")
-    p.add_argument("--corruption_severity", type=int, default=3,
-                   choices=[1, 2, 3, 4, 5], help="Corruption severity 1-5 (default: 3)")
     p.add_argument("--target_captions", help="Target captions file (coa)")
     p.add_argument("--clean_captions", help="Clean captions file (coa)")
     p.add_argument("--class_label", type=int, help="ImageNet class label (advdiffvlm)")
 
-    # Text-guided attacks
     p.add_argument("--target_text", help="Target text (advedm_r, vattack, figstep, promptinject)")
     p.add_argument("--source_text", help="Source text (vattack)")
     p.add_argument("--question", help="Question to inject into (promptinject)")
     p.add_argument("--level", choices=["instruction", "authority"], help="PromptInject level")
     p.add_argument("--labels_file", help="Per-sample labels JSON (auto-detected from --dataset)")
 
-    # Smart mode: VLM-based target normalization + injection text generation
     p.add_argument("--vlm_url", help="VLM server URL for smart target resolution (e.g. http://localhost:8001)")
     p.add_argument("--vlm_model", default="Qwen/Qwen2.5-VL-7B-Instruct",
                    help="Model name for smart mode (default: Qwen/Qwen2.5-VL-7B-Instruct)")
@@ -272,7 +251,6 @@ def parse_args():
 
 
 def validate_args(args):
-    # Resolve dataset paths
     if args.dataset:
         ds = DATASETS.get(args.dataset)
         if not ds:
@@ -289,7 +267,6 @@ def validate_args(args):
         errors.append("--source or --dataset is required")
     if args.attack in IMAGE_ATTACKS and not args.target:
         errors.append(f"--target is required for {args.attack}")
-    # Text-guided attacks need either --target_text or --labels_file for per-sample targets
     if args.attack in TEXT_GUIDED_ATTACKS and not args.target_text and not args.labels_file:
         errors.append(f"--target_text or --labels_file is required for {args.attack}")
     if args.attack == "promptinject" and not args.question:
@@ -310,22 +287,29 @@ def main():
     print(f"Source:  {args.source} ({len(images)} images)")
     print(f"Output:  {args.output}")
 
-    # Load per-sample labels if available
     per_sample_labels = {}
     if args.labels_file and Path(args.labels_file).exists():
         with open(args.labels_file) as f:
             per_sample_labels = json.load(f)
         print(f"Labels:  {args.labels_file} ({len(per_sample_labels)} entries)")
 
+    dataset = None
+    stem_to_idx = {}
+    if getattr(args, "dataset", None) in DATASET_CLASSES:
+        dataset = DATASET_CLASSES[args.dataset](
+            question=args.question or "What is the main object in this image?",
+            max_samples=args.max_samples,
+        )
+        stem_to_idx = {p.stem: i for i, p in enumerate(dataset.entries)}
+        print(f"Dataset: {args.dataset} ({len(dataset)} samples)")
+
     attack = create_attack(args.attack, args, images)
 
-    # Smart target resolution: per-sample when labels available, global fallback
     vlm_url = getattr(args, "vlm_url", None)
     vlm_model = getattr(args, "vlm_model", "")
     level = getattr(args, "level", None) or "instruction"
     use_smart = args.attack in {"figstep", "promptinject"} and vlm_url
 
-    # Global-only smart mode (no per-sample labels, single --target_text)
     if use_smart and args.target_text and not per_sample_labels:
         _, injection = smart_resolve_target(
             args.target_text, args.attack, vlm_url, vlm_model, level,
@@ -339,45 +323,9 @@ def main():
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Corruption: run all 6 modes into subfolders
-    if args.attack == "corruption":
-        from tqdm import tqdm
-        from vlm_benchmark.attacks.corruption.config import VALID_MODES
-        severity = args.corruption_severity
-        t0 = datetime.now()
-        for mode in VALID_MODES:
-            mode_dir = out_dir / mode
-            mode_dir.mkdir(parents=True, exist_ok=True)
-            atk = AttackRegistry.create("corruption", mode=mode, severity=severity,
-                                        device=args.device, epsilon=0.0, max_iterations=1)
-            results = []
-            for img_path in tqdm(images, desc=f"corruption/{mode}"):
-                sample = make_sample(img_path)
-                try:
-                    result = atk.generate(model=None, sample=sample)
-                    out_file = mode_dir / f"{img_path.stem}.jpg"
-                    result.adversarial_sample.save(out_file)
-                    results.append({"id": img_path.stem, "output": _relpath(out_file),
-                                    "perturbation_norm": 0.0, "mode": mode})
-                except Exception as e:
-                    results.append({"id": img_path.stem, "error": str(e), "mode": mode})
-            manifest = {
-                "attack": "corruption", "mode": mode, "severity": severity,
-                "n_samples": len(results),
-                "n_errors": sum(1 for r in results if "error" in r),
-                "samples": results,
-            }
-            with open(mode_dir / "manifest.json", "w") as f:
-                json.dump(manifest, f, indent=2)
-            n_ok = sum(1 for r in results if "output" in r)
-            print(f"  {mode}: {n_ok}/{len(images)}")
-        duration = (datetime.now() - t0).total_seconds()
-        print(f"\nDone: all 6 modes in {duration:.1f}s → {out_dir}")
-        return
-
     from tqdm import tqdm
 
-    # Resume support: load existing manifest and skip completed samples
+    # Resume: skip samples already completed in an existing manifest
     existing_manifest = out_dir / "manifest.json"
     completed_ids = set()
     prior_results = []
@@ -398,20 +346,22 @@ def main():
     t0 = datetime.now()
 
     for idx, img_path in enumerate(tqdm(remaining, desc=args.attack)):
-        # Find the original index in the full image list
         full_idx = next(i for i, p in enumerate(images) if p.stem == img_path.stem)
 
-        # Build per-sample metadata from labels
-        sample_meta = {}
         stem = img_path.stem
-        if stem in per_sample_labels:
-            label = per_sample_labels[stem]
-            sample_meta["attack_target_text"] = label.get("target", "")
-            sample_meta["attack_source_text"] = label.get("source", "")
-            sample_meta["source_label"] = label.get("source", "")
-            sample_meta["target_label"] = label.get("target", "")
+        if dataset is not None and stem in stem_to_idx:
+            sample = dataset.get_sample(stem_to_idx[stem])
+        else:
+            meta = {}
+            if stem in per_sample_labels:
+                label = per_sample_labels[stem]
+                meta["attack_target_text"] = label.get("target", "")
+                meta["attack_source_text"] = label.get("source", "")
+                meta["source_label"] = label.get("source", "")
+                meta["target_label"] = label.get("target", "")
+            sample = make_sample(img_path, question=args.question or "", metadata=meta)
+        sample_meta = sample.metadata
 
-        # Per-sample smart injection text generation
         if use_smart and sample_meta.get("attack_target_text"):
             raw_target = sample_meta["attack_target_text"]
             _, injection = smart_resolve_target(
@@ -419,11 +369,8 @@ def main():
                 source_text=sample_meta.get("attack_source_text", ""),
                 question=args.question or "",
             )
-            # No normalization — keep raw target as-is
             if injection:
                 sample_meta["attack_injection_text"] = injection
-
-        sample = make_sample(img_path, question=args.question or "", metadata=sample_meta)
         try:
             result = attack.generate(model=None, sample=sample, sample_idx=full_idx)
             ext = ".png" if args.attack in _PNG_ATTACKS else ".jpg"
@@ -436,19 +383,16 @@ def main():
                 "question": args.question or "",
                 "perturbation_norm": result.perturbation_norm,
             }
-            # Add labels from dataset
             if sample_meta.get("source_label"):
                 entry["source_label"] = sample_meta["source_label"]
             if sample_meta.get("target_label"):
                 entry["target_label"] = sample_meta["target_label"]
-            # Add target image for image-targeted attacks
             if args.target and Path(args.target).is_dir():
                 for ext in (".jpg", ".png", ".jpeg"):
                     tp = Path(args.target) / f"{stem}{ext}"
                     if tp.exists():
                         entry["target"] = _relpath(tp)
                         break
-            # Text-guided attacks: record per-sample target text
             if sample_meta.get("attack_target_text"):
                 entry["target_text"] = sample_meta["attack_target_text"]
             if result.metadata:
@@ -473,7 +417,6 @@ def main():
 
     duration = (datetime.now() - t0).total_seconds()
 
-    # Final manifest write
     manifest = {
         "attack": args.attack,
         "n_samples": len(results),

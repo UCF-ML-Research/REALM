@@ -1,9 +1,4 @@
-"""
-ClipCap components for Chain of Attack.
-
-Extracted verbatim from legacy/Chain_of_Attack/train.py
-(MLP, ClipCaptionModel, generate_cap).
-"""
+"""ClipCap components (MLP, ClipCaptionModel, generate_cap) for Chain of Attack."""
 
 from typing import Tuple, Optional
 
@@ -13,7 +8,6 @@ import torch.nn.functional as nnf
 from transformers import GPT2LMHeadModel
 from tqdm import trange
 
-# Type aliases (matching original train.py)
 T = torch.Tensor
 D = torch.device
 

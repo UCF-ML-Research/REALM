@@ -1,0 +1,44 @@
+# ── Python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ── Virtual environments ────────────────────────────────────────────
+.venv/
+.venv-*/
+venv/
+env/
+*-env/
+
+# ── Model weights / checkpoints (download via check_and_download_weights.sh) ──
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.bin
+vlm_benchmark/**/assets/checkpoints/
+vlm_benchmark/**/assets/pretrained/
+vlm_benchmark/**/assets/models/
+vlm_benchmark/**/assets/clip_cache/
+vlm_benchmark/**/assets/som/*.pth
+vlm_benchmark/attacks/paattack/prototypes/
+
+# ── Generated outputs / caches ──────────────────────────────────────
+dataset/**/adversarial/
+dataset/**/cleaned/
+dataset/**/coordinates/
+dataset/**/sam_labels/
+dataset/**/som/
+eval_results/
+results/
+outputs/
+
+# ── Misc ────────────────────────────────────────────────────────────
+*.log
+.DS_Store
+torch_cache/

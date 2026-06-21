@@ -1,7 +1,7 @@
 import torch
 from torch import nn, Tensor
 from abc import abstractmethod
-from typing import List, Any, Callable, Dict
+from typing import List, Any, Dict
 from kmeans_pytorch import kmeans
 import torch.nn.functional as F
 from torchvision import transforms as T
@@ -38,11 +38,7 @@ class EnsembleFeatureExtractor(BaseFeatureExtractor):
         self.extractors = nn.ModuleList(extractors)
 
     def forward(self, x: Tensor) -> Tensor:
-        # features = []
-        # for model in self.extractors:
-        #     features.append(model(x).squeeze())
-        # features = torch.cat(features, dim=0)
-        features = {}  # 不拼接，改为字典存储
+        features = {}
         for i, model in enumerate(self.extractors):
             features[i] = model(x).squeeze()
         return features
@@ -54,14 +50,9 @@ class EnsembleFeatureExtractor_ot(BaseFeatureExtractor):
         self.cluster_number = cluster_number
 
     def forward(self, x: Tensor) -> Tensor:
-        # features = []
-        # for model in self.extractors:
-        #     features.append(model(x).squeeze())
-        # features = torch.cat(features, dim=0)
-        features = {}  # 不拼接，改为字典存储
+        features = {}
         features_local = {}
         for i, model in enumerate(self.extractors):
-            # features[i] = model(x).squeeze()
             x_tensor, x_embedding = model.global_local_features(x)
             features[i] = x_tensor.squeeze()
             cluster_center = self.get_cluster_center(x_embedding[0],x.device).unsqueeze(0)
@@ -70,9 +61,6 @@ class EnsembleFeatureExtractor_ot(BaseFeatureExtractor):
         return features,features_local
 
     def get_cluster_center(self, embedding_img,device):
-        # self.setup_seed(20)
-        # for i in range(10):
-        # np.random.seed(20)
         with suppress_output():
             cluster_ids_x, cluster_center = kmeans(
                 X=embedding_img,
@@ -81,7 +69,6 @@ class EnsembleFeatureExtractor_ot(BaseFeatureExtractor):
                 device=device,
             )
             cluster_center = cluster_center.to(device)
-        # print(cluster_ids_x)
         return cluster_center
 
 class EnsembleFeatureExtractor_ot3(BaseFeatureExtractor):
@@ -90,14 +77,9 @@ class EnsembleFeatureExtractor_ot3(BaseFeatureExtractor):
         self.extractors = nn.ModuleList(extractors)
 
     def forward(self, x: Tensor) -> Tensor:
-        # features = []
-        # for model in self.extractors:
-        #     features.append(model(x).squeeze())
-        # features = torch.cat(features, dim=0)
-        features = {}  # 不拼接，改为字典存储
+        features = {}
         features_local = {}
         for i, model in enumerate(self.extractors):
-            # features[i] = model(x).squeeze()
             x_tensor, x_embedding = model.global_local_features(x)
             features[i] = x_tensor.squeeze()
             cluster_center = self.get_cluster_center(x_embedding[0],x.device).unsqueeze(0)
@@ -106,9 +88,6 @@ class EnsembleFeatureExtractor_ot3(BaseFeatureExtractor):
         return features,features_local
 
     def get_cluster_center(self, embedding_img,device):
-        # self.setup_seed(20)
-        # for i in range(10):
-        # np.random.seed(20)
         with suppress_output():
             cluster_ids_x, cluster_center = kmeans(
                 X=embedding_img,
@@ -117,7 +96,6 @@ class EnsembleFeatureExtractor_ot3(BaseFeatureExtractor):
                 device=device,
             )
             cluster_center = cluster_center.to(device)
-        # print(cluster_ids_x)
         return cluster_center
 
 
@@ -175,8 +153,6 @@ class EnsembleFeatureLoss_OT(nn.Module):
             gt = self.ground_truth[index]
             feature = feature_dict[index]
             feature_local = feature_local_dict[index].squeeze(0)
-            # print("gt_local",gt_local.shape)
-            # print("feature_local", feature_local.shape)
             loss_local += self.OT(gt_local, feature_local) * 2
 
             loss += torch.mean(torch.sum(feature * gt, dim=1))
@@ -184,8 +160,6 @@ class EnsembleFeatureLoss_OT(nn.Module):
         loss = loss / len(self.extractors)
         loss_local=loss_local / len(self.extractors)
 
-        # print("loss",loss)
-        # print("loss_local", loss_local)
         loss=loss+loss_local*0.1
         return loss
 
@@ -203,7 +177,6 @@ class EnsembleFeatureLoss_OT(nn.Module):
         return cluster_center
 
     def OT(self, src_dis, tgt_dis):
-        # print(src_dis.shape, tgt_dis.shape)
         src_dis_norm = F.normalize(src_dis, dim=1)
         tgt_dis_norm = F.normalize(tgt_dis, dim=1)
         sim = torch.einsum('md,nd->mn', src_dis_norm, tgt_dis_norm).contiguous()
@@ -266,8 +239,6 @@ class EnsembleFeatureLoss_OT_Auto(nn.Module):
             gt = self.ground_truth[index]
             feature = feature_dict[index]
             feature_local = feature_local_dict[index].squeeze(0)
-            # print("gt_local",gt_local.shape)
-            # print("feature_local", feature_local.shape)
             local_loss = self.OT(gt_local, feature_local) * 2
             feat_loss = torch.mean(torch.sum(feature * gt, dim=1))
 
@@ -278,7 +249,6 @@ class EnsembleFeatureLoss_OT_Auto(nn.Module):
             loss_list[i] + 0.1 * loss_local_list[i]
             for i in range(len(self.extractors))
         ]
-        # 初始化 previous_loss_list（首次）
         if len(self.previous_loss_list) == 0:
             self.previous_loss_list = [l.detach() for l in total_losses]
 
@@ -286,20 +256,18 @@ class EnsembleFeatureLoss_OT_Auto(nn.Module):
         for i in range(len(self.extractors)):
             ratio = total_losses[i].item() / (self.previous_loss_list[i].item() + 1e-8)
             weights.append(ratio)
-            # 归一化 softmax 计算动态权重
+
         T = 1.0
         K = len(weights)
         weights_np = np.array(weights)
         weights_softmax = np.exp(weights_np / T)
         weights_softmax /= np.sum(weights_softmax)
-        weights_softmax *= K  # 可选：缩放为 K
+        weights_softmax *= K
 
 
-        # 初始化 previous_loss_list（首次）
         for i in range(len(self.extractors)):
             self.previous_loss_list[i] = total_losses[i].detach()
 
-        # 加权总损失
         total_loss = sum(
             weights_softmax[i] * total_losses[i]
             for i in range(len(self.extractors))
@@ -320,7 +288,6 @@ class EnsembleFeatureLoss_OT_Auto(nn.Module):
         return cluster_center
 
     def OT(self, src_dis, tgt_dis):
-        # print(src_dis.shape, tgt_dis.shape)
         src_dis_norm = F.normalize(src_dis, dim=1)
         tgt_dis_norm = F.normalize(tgt_dis, dim=1)
         sim = torch.einsum('md,nd->mn', src_dis_norm, tgt_dis_norm).contiguous()
@@ -380,11 +347,8 @@ class EnsembleFeatureLoss_OT_foa_attack(nn.Module):
             gt = self.ground_truth[index]
             feature = feature_dict[index].unsqueeze(0)
             feature_local = feature_local_dict[index].squeeze(0)
-            # print("gt_local",gt_local.shape)
-            # print("feature_local", feature_local.shape)
             local_loss = self.OT(gt_local, feature_local)
-            
-            # feat_loss = torch.mean(torch.sum(feature * gt, dim=1))
+
             feat_loss = self.OT(gt,feature)
 
             loss_list.append(feat_loss)
@@ -394,7 +358,6 @@ class EnsembleFeatureLoss_OT_foa_attack(nn.Module):
             loss_list[i] + 0.2 * loss_local_list[i]
             for i in range(len(self.extractors))
         ]
-        # 初始化 previous_loss_list（首次）
         if len(self.previous_loss_list) == 0:
             self.previous_loss_list = [l.detach() for l in total_losses]
 
@@ -402,21 +365,18 @@ class EnsembleFeatureLoss_OT_foa_attack(nn.Module):
         for i in range(len(self.extractors)):
             ratio = total_losses[i].item() / (self.previous_loss_list[i].item() + 1e-8)
             weights.append(ratio)
-            # 归一化 softmax 计算动态权重
-        
+
         T = 1.0
         K = len(weights)
         weights_np = np.array(weights)
         weights_softmax = np.exp(weights_np / T)
         weights_softmax /= np.sum(weights_softmax)
-        weights_softmax *= K  # 可选：缩放为 K
+        weights_softmax *= K
 
 
-        # 初始化 previous_loss_list（首次）
         for i in range(len(self.extractors)):
             self.previous_loss_list[i] = total_losses[i].detach()
 
-        # 加权总损失
         total_loss = sum(
             weights_softmax[i] * total_losses[i]
             for i in range(len(self.extractors))
@@ -424,9 +384,6 @@ class EnsembleFeatureLoss_OT_foa_attack(nn.Module):
         return total_loss
 
     def get_cluster_center(self, embedding_img,device):
-        # self.setup_seed(20)
-        # for i in range(10):
-        # np.random.seed(20)
         with suppress_output():
             cluster_ids_x, cluster_center = kmeans(
                 X=embedding_img,
@@ -436,11 +393,9 @@ class EnsembleFeatureLoss_OT_foa_attack(nn.Module):
                 tol=1e-4,
             )
             cluster_center = cluster_center.to(device)
-        # print(cluster_ids_x)
         return cluster_center
 
     def OT(self, src_dis, tgt_dis):
-        # print(src_dis.shape, tgt_dis.shape)
         src_dis_norm = F.normalize(src_dis, dim=1)
         tgt_dis_norm = F.normalize(tgt_dis, dim=1)
         sim = torch.einsum('md,nd->mn', src_dis_norm, tgt_dis_norm).contiguous()
@@ -510,7 +465,6 @@ class EnsembleFeatureLoss_OT_ablation_wo_global(nn.Module):
             loss_list[i] + 0.2 * loss_local_list[i]
             for i in range(len(self.extractors))
         ]
-        # 初始化 previous_loss_list（首次）
         if len(self.previous_loss_list) == 0:
             self.previous_loss_list = [l.detach() for l in total_losses]
 
@@ -518,21 +472,18 @@ class EnsembleFeatureLoss_OT_ablation_wo_global(nn.Module):
         for i in range(len(self.extractors)):
             ratio = total_losses[i].item() / (self.previous_loss_list[i].item() + 1e-8)
             weights.append(ratio)
-            # 归一化 softmax 计算动态权重
-        
+
         T = 1.0
         K = len(weights)
         weights_np = np.array(weights)
         weights_softmax = np.exp(weights_np / T)
         weights_softmax /= np.sum(weights_softmax)
-        weights_softmax *= K  # 可选：缩放为 K
+        weights_softmax *= K
 
 
-        # 初始化 previous_loss_list（首次）
         for i in range(len(self.extractors)):
             self.previous_loss_list[i] = total_losses[i].detach()
 
-        # 加权总损失
         total_loss = sum(
             weights_softmax[i] * total_losses[i]
             for i in range(len(self.extractors))
@@ -552,7 +503,6 @@ class EnsembleFeatureLoss_OT_ablation_wo_global(nn.Module):
         return cluster_center
 
     def OT(self, src_dis, tgt_dis):
-        # print(src_dis.shape, tgt_dis.shape)
         src_dis_norm = F.normalize(src_dis, dim=1)
         tgt_dis_norm = F.normalize(tgt_dis, dim=1)
         sim = torch.einsum('md,nd->mn', src_dis_norm, tgt_dis_norm).contiguous()
@@ -619,7 +569,6 @@ class EnsembleFeatureLoss_OT_ablation_wo_local(nn.Module):
             loss_list[i]
             for i in range(len(self.extractors))
         ]
-        # 初始化 previous_loss_list（首次）
         if len(self.previous_loss_list) == 0:
             self.previous_loss_list = [l.detach() for l in total_losses]
 
@@ -627,21 +576,18 @@ class EnsembleFeatureLoss_OT_ablation_wo_local(nn.Module):
         for i in range(len(self.extractors)):
             ratio = total_losses[i].item() / (self.previous_loss_list[i].item() + 1e-8)
             weights.append(ratio)
-            # 归一化 softmax 计算动态权重
-        
+
         T = 1.0
         K = len(weights)
         weights_np = np.array(weights)
         weights_softmax = np.exp(weights_np / T)
         weights_softmax /= np.sum(weights_softmax)
-        weights_softmax *= K  # 可选：缩放为 K
+        weights_softmax *= K
 
 
-        # 初始化 previous_loss_list（首次）
         for i in range(len(self.extractors)):
             self.previous_loss_list[i] = total_losses[i].detach()
 
-        # 加权总损失
         total_loss = sum(
             weights_softmax[i] * total_losses[i]
             for i in range(len(self.extractors))
@@ -661,7 +607,6 @@ class EnsembleFeatureLoss_OT_ablation_wo_local(nn.Module):
         return cluster_center
 
     def OT(self, src_dis, tgt_dis):
-        # print(src_dis.shape, tgt_dis.shape)
         src_dis_norm = F.normalize(src_dis, dim=1)
         tgt_dis_norm = F.normalize(tgt_dis, dim=1)
         sim = torch.einsum('md,nd->mn', src_dis_norm, tgt_dis_norm).contiguous()
@@ -729,7 +674,6 @@ class EnsembleFeatureLoss_OT_ablation_wo_dynamic(nn.Module):
             for i in range(len(self.extractors))
         ]
 
-        # 加权总损失
         total_loss = sum(total_losses)/len(total_losses)
         return total_loss
 
@@ -746,7 +690,6 @@ class EnsembleFeatureLoss_OT_ablation_wo_dynamic(nn.Module):
         return cluster_center
 
     def OT(self, src_dis, tgt_dis):
-        # print(src_dis.shape, tgt_dis.shape)
         src_dis_norm = F.normalize(src_dis, dim=1)
         tgt_dis_norm = F.normalize(tgt_dis, dim=1)
         sim = torch.einsum('md,nd->mn', src_dis_norm, tgt_dis_norm).contiguous()

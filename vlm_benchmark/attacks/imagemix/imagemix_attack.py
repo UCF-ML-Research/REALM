@@ -1,26 +1,16 @@
-"""ImageMix: simple alpha-blend / cutmix pixel perturbation.
-
-No gradients, no CLIP, no GPU required. Serves as a trivial lower-bound
-baseline for pixel-level attacks.
-
-  mixup:   adv = alpha * target + (1-alpha) * clean
-  cutmix:  paste a random rectangular region from target onto clean
-"""
+"""ImageMix: simple alpha-blend / cutmix pixel perturbation baseline."""
 
 import random
 from pathlib import Path
 
 from PIL import Image
 
-from ..base_attack import AttackConfig, AttackResult, BaseAttack
+from ..base_attack import AttackResult, BaseAttack
 from ...data.base_dataset import Sample
 from .config import ImageMixConfig
 
 
 class ImageMixAttack(BaseAttack):
-
-    def is_gradient_based(self) -> bool:
-        return False
 
     def _load_target(self, sample_id: str) -> Image.Image:
         target_dir = Path(self.config.target_images_dir)
@@ -39,7 +29,6 @@ class ImageMixAttack(BaseAttack):
     def _cutmix(self, clean: Image.Image, target: Image.Image) -> Image.Image:
         target = target.resize(clean.size, Image.LANCZOS)
         w, h = clean.size
-        # Random rectangle covering alpha fraction of the image
         area = self.config.alpha
         rw = int(w * area ** 0.5)
         rh = int(h * area ** 0.5)

@@ -1,4 +1,3 @@
-import torch
 import torch.nn.functional as F
 
 
@@ -36,16 +35,7 @@ def compute_loss(embedding, embedding_orig, tokens_mask, tokens, tokens_orig, ta
 
 
 def cosine_similarity_loss(out, targets, reduction='none', eps=1e-8):
-    """Per-token 1 - cosine_similarity.
-
-    Args:
-        out: (B, L, D)
-        targets: (B, L, D) or broadcastable
-        reduction: 'none' returns (B, L), 'mean' returns scalar
-
-    Returns:
-        Loss tensor.
-    """
+    """Per-token (1 - cosine similarity) loss."""
     out_norm = F.normalize(out, p=2, dim=-1)
     targets_norm = F.normalize(targets, p=2, dim=-1)
     cosine_sim = (out_norm * targets_norm).sum(dim=-1)

@@ -1,8 +1,4 @@
-"""CLIPEncoder + Decoder for AnyAttack.
-
-Adapted from AnyAttack/models/model.py — the only change is that CLIPEncoder
-loads CLIP weights from local assets instead of downloading from Azure.
-"""
+"""CLIPEncoder + Decoder for AnyAttack."""
 
 import os
 
@@ -19,7 +15,6 @@ _ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets")
 class CLIPEncoder(nn.Module):
     def __init__(self, model_name="ViT-B/32"):
         super(CLIPEncoder, self).__init__()
-        # Load from local asset (ViT-B-32.pt), not from Azure
         local_path = os.path.join(_ASSETS_DIR, "clip", "ViT-B-32.pt")
         if os.path.isfile(local_path):
             self.model, _ = clip.load(local_path, "cpu")
@@ -42,13 +37,6 @@ class CLIPEncoder(nn.Module):
         text_tokens = clip.tokenize(texts, truncate=True).to(device)
         text_features = self.model.encode_text(text_tokens)
         return text_features
-
-
-def get_group_norm(num_channels, num_groups=32):
-    if num_channels < num_groups:
-        return nn.GroupNorm(num_groups=num_channels, num_channels=num_channels)
-    return nn.GroupNorm(num_groups=min(num_groups, num_channels), num_channels=num_channels)
-
 
 class EfficientAttention(nn.Module):
     def __init__(self, in_channels, key_channels, head_count, value_channels):

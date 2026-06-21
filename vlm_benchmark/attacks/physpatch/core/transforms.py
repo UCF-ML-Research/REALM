@@ -11,22 +11,12 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class My_T:
-    """
-    Ensemble of diverse image transformations for robust adversarial attacks.
-
-    Applies random transformations including geometric, color, frequency-domain,
-    and noise-based augmentations.
-    """
+    """Ensemble of diverse random image transformations for robust adversarial attacks."""
 
     def __init__(self, num_copies=5, **kwargs):
-        """
-        Args:
-            num_copies: Number of transformed copies to generate per input
-        """
         self.num_copies = num_copies
         self.kernel = self.gkern()
 
-        # Transformation operations
         self.op = [
             self.resize,
             self.vertical_shift,
@@ -108,25 +98,13 @@ class My_T:
         return torch.from_numpy(stack_kernel.astype(np.float32)).to(device)
 
     def adjust_brightness(self, x, factor=None):
-        """
-        Adjust brightness by scaling all pixels.
-
-        Args:
-            x: Input tensor
-            factor: Brightness factor (>1: brighter, <1: darker)
-        """
+        """Adjust brightness by scaling all pixels."""
         if factor is None:
             factor = np.random.uniform(0.9, 1.1)
         return (x * factor).clamp(0, 255)
 
     def adjust_contrast(self, x, factor=None):
-        """
-        Adjust contrast by changing difference from mean.
-
-        Args:
-            x: Input tensor
-            factor: Contrast factor (>1: more contrast, <1: less contrast)
-        """
+        """Adjust contrast by scaling deviation from the mean."""
         if factor is None:
             factor = np.random.uniform(0.8, 1.2)
         mean = x.mean(dim=(2, 3), keepdim=True)
@@ -143,13 +121,5 @@ class My_T:
         return trans(x)
 
     def transform(self, x, **kwargs):
-        """
-        Apply multiple random transformations.
-
-        Args:
-            x: Input tensor
-
-        Returns:
-            Concatenated transformed copies
-        """
+        """Apply multiple random transformations and concatenate the copies."""
         return torch.cat([self.blocktransform(x) for _ in range(self.num_copies)])

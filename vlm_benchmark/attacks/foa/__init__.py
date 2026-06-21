@@ -1,9 +1,4 @@
-"""
-FOA-Attack Module
-=================
-
-Full-image adversarial perturbation using Optimal Transport loss.
-"""
+"""FOA-Attack: full-image adversarial perturbation using Optimal Transport loss."""
 
 from .foa_attack import FOAAttack, FOAAttackConfig
 

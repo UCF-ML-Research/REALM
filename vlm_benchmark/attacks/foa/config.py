@@ -41,18 +41,6 @@ def resolve_generate_kwargs(attack_name, args):
         kwargs["cluster_number"] = args.cluster_number
     return kwargs
 
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import STANDARD_TARGETS, EVAL_QUERY
-    strategy = getattr(config, "target_strategy", "stop_sign")
-    base = STANDARD_TARGETS.get(strategy, {
-        "description": f"Target: {strategy}",
-        "reference_text": f"A {strategy} is visible",
-        "target_image": None,
-    })
-    return {**base, "evaluation_query": EVAL_QUERY}
-
-
 def get_target_images_dir(clean_images_dir: str):
     """Auto-infer target images directory from clean images directory."""
     clean_path = Path(clean_images_dir)

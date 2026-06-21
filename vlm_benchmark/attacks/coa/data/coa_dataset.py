@@ -1,10 +1,7 @@
-"""
-Dataset loader for Chain of Attack.
-Handles loading clean/target images and their corresponding captions.
-"""
+"""Dataset loader for Chain of Attack (clean/target images and captions)."""
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 from PIL import Image
 
 
@@ -18,23 +15,13 @@ class CoADataset:
         target_images_dir: str,
         target_captions_path: str,
     ):
-        """
-        Initialize CoA dataset.
-
-        Args:
-            clean_images_dir: Directory with clean images (e.g., PhysPatch clean)
-            clean_captions_path: Text file with clean captions (one per line)
-            target_images_dir: Directory with target images (e.g., replicated stop signs)
-            target_captions_path: Text file with target captions (one per line)
-        """
+        """Initialize CoA dataset from clean/target image dirs and caption files."""
         self.clean_images_dir = Path(clean_images_dir)
         self.target_images_dir = Path(target_images_dir)
 
-        # Load captions
         self.clean_captions = self._load_captions(clean_captions_path)
         self.target_captions = self._load_captions(target_captions_path)
 
-        # Load image paths (sorted by name)
         self.clean_image_paths = sorted(
             list(self.clean_images_dir.glob("*.jpg"))
             + list(self.clean_images_dir.glob("*.png"))
@@ -46,7 +33,6 @@ class CoADataset:
             + list(self.target_images_dir.glob("*.jpeg"))
         )
 
-        # Validate dataset
         self._validate_dataset()
 
     def _load_captions(self, captions_path: str) -> List[str]:
@@ -76,8 +62,7 @@ class CoADataset:
         if n_target_imgs == 0:
             raise ValueError(f"No target images found in {self.target_images_dir}")
 
-        # Allow missing or partial clean captions (will be auto-generated)
-        # Captions file can have fewer entries than images (rest will be auto-generated)
+        # Missing/partial clean captions are allowed (auto-generated on demand)
         if n_clean_caps > n_clean_imgs:
             raise ValueError(
                 f"Too many captions: {n_clean_caps} captions but only {n_clean_imgs} images"
@@ -111,25 +96,13 @@ class CoADataset:
         return len(self.clean_image_paths)
 
     def __getitem__(self, idx: int) -> Dict:
-        """
-        Get sample at index.
-
-        Returns:
-            Dictionary with:
-                - clean_image: PIL.Image (clean image)
-                - clean_caption: str (clean caption)
-                - target_image: PIL.Image (target image)
-                - target_caption: str (target caption)
-                - image_path: str (clean image path for reference)
-                - image_name: str (clean image filename)
-        """
+        """Get the sample dict (images, captions, paths) at the given index."""
         if idx < 0 or idx >= len(self):
             raise IndexError(f"Index {idx} out of range [0, {len(self)})")
 
         clean_img_path = self.clean_image_paths[idx]
         target_img_path = self.target_image_paths[idx]
 
-        # Use empty string for clean caption if not available (will be auto-generated)
         clean_caption = self.clean_captions[idx] if idx < len(self.clean_captions) else ""
 
         target_caption = self.target_captions[idx] if idx < len(self.target_captions) else ""
@@ -142,20 +115,4 @@ class CoADataset:
             "target_image_path": str(target_img_path),
             "image_path": str(clean_img_path),
             "image_name": clean_img_path.name,
-        }
-
-    def get_sample_info(self, idx: int) -> Dict[str, str]:
-        """Get sample metadata without loading images (faster)."""
-        if idx < 0 or idx >= len(self):
-            raise IndexError(f"Index {idx} out of range [0, {len(self)})")
-
-        clean_img_path = self.clean_image_paths[idx]
-
-        clean_caption = self.clean_captions[idx] if idx < len(self.clean_captions) else ""
-        target_caption = self.target_captions[idx] if idx < len(self.target_captions) else ""
-        return {
-            "image_name": clean_img_path.name,
-            "image_path": str(clean_img_path),
-            "clean_caption": clean_caption,
-            "target_caption": target_caption,
         }

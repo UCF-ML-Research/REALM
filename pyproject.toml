@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "realm"
+version = "0.1.0"
+description = "REALM: A Unified Red-Teaming Benchmark for Physical-World VLMs"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[project.urls]
+Repository = "https://github.com/UCF-ML-Research/REALM"
+
+[tool.setuptools.dynamic]
+# Reuse requirements.txt; comment lines (e.g. the git-only installs) are ignored.
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["vlm_benchmark*"]

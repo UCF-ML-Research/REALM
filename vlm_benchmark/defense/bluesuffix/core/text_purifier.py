@@ -1,10 +1,4 @@
-"""BlueSuffix Text Purifier — GPT-4o prompt rewriting.
-
-Sends the user prompt to GPT-4o to detect hidden jailbreak intent
-and rewrite it so the VLM can refuse. Benign prompts pass through unchanged.
-
-Extracted from legacy/run_bluesuffix.py lines 116-153.
-"""
+"""BlueSuffix text purifier that rewrites prompts via GPT-4o to surface hidden jailbreak intent."""
 
 import re
 
@@ -30,16 +24,7 @@ def extract_content(text):
 
 
 def purify_text(prompt, api_key, model="gpt-4o"):
-    """Run text through GPT-4o text purifier.
-
-    Args:
-        prompt: Original text prompt
-        api_key: OpenAI API key
-        model: OpenAI model name (default: gpt-4o)
-
-    Returns:
-        Purified prompt string, or original prompt on failure
-    """
+    """Run text through the GPT-4o purifier, returning the purified prompt or the original on failure."""
     import openai
     client = openai.OpenAI(api_key=api_key)
     user_message = DEFENSE_TEMPLATE.format(prompt)
@@ -54,5 +39,4 @@ def purify_text(prompt, api_key, model="gpt-4o"):
     cleaned = extract_content(answer)
     if cleaned:
         return cleaned[0].strip().replace("'", "").replace("[", "").replace("]", "").replace("\n", "")
-    # Fallback: return original prompt if extraction fails
     return prompt

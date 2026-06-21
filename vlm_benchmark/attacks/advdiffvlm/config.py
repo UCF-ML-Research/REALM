@@ -48,18 +48,6 @@ def resolve_generate_kwargs(attack_name, args):
     kwargs["gradcam_masks_dir"] = get_gradcam_masks_dir(args.clean_images)
     return kwargs
 
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import STANDARD_TARGETS, EVAL_QUERY
-    strategy = getattr(config, "target_strategy", "stop_sign")
-    base = STANDARD_TARGETS.get(strategy, {
-        "description": f"Target: {strategy}",
-        "reference_text": f"A {strategy} is visible",
-        "target_image": None,
-    })
-    return {**base, "evaluation_query": EVAL_QUERY}
-
-
 def get_checkpoint_path():
     """Get path to Latent Diffusion checkpoint (1.8 GB)."""
     checkpoint = BASE_DIR / "assets" / "checkpoints" / "ldm_cin256-v2.ckpt"
@@ -97,13 +85,3 @@ def get_target_images_dir(clean_images_dir: str):
     dataset_root = clean_path.parent.parent
     target_dir = dataset_root / "images" / "target"
     return str(target_dir)
-
-
-def infer_class_label_from_target(target_strategy: str) -> int:
-    """Map target strategy to ImageNet class label for GradCAM."""
-    TARGET_TO_LABEL = {
-        "stop_sign": 920,
-        "plane": 404,
-        "traffic_light": 920,
-    }
-    return TARGET_TO_LABEL.get(target_strategy, 920)

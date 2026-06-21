@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class AttackSpec:
     """Specification for an attack's parameters."""
     name: str
-    category: str  # "visual", "physical", etc.
+    category: str
     attack_class: Type["BaseAttack"]
     config_class: Type["AttackConfig"]
     defaults: Dict[str, Any] = field(default_factory=dict)
@@ -24,74 +24,25 @@ class AttackRegistry:
 
     @classmethod
     def register(cls, spec: AttackSpec) -> None:
-        """Register an attack.
-
-        Args:
-            spec: Attack specification
-        """
+        """Register an attack."""
         cls._registry[spec.name] = spec
 
     @classmethod
     def create(cls, name: str, **config_kwargs) -> "BaseAttack":
-        """Create attack instance with validation.
-
-        Args:
-            name: Attack name
-            **config_kwargs: Configuration parameters
-
-        Returns:
-            Attack instance
-
-        Raises:
-            ValueError: If attack name is unknown
-        """
+        """Create an attack instance, applying registered defaults."""
         if name not in cls._registry:
             available = list(cls._registry.keys())
             raise ValueError(f"Unknown attack: {name}. Available: {available}")
 
         spec = cls._registry[name]
-        # Apply defaults, then override with provided kwargs
         final_kwargs = {**spec.defaults, **config_kwargs}
         config = spec.config_class(**final_kwargs)
         return spec.attack_class(config)
 
     @classmethod
     def get_spec(cls, name: str) -> Optional[AttackSpec]:
-        """Get attack specification by name.
-
-        Args:
-            name: Attack name
-
-        Returns:
-            AttackSpec or None if not found
-        """
+        """Get attack specification by name, or None if not found."""
         return cls._registry.get(name)
-
-    @classmethod
-    def list_attacks(cls, category: Optional[str] = None) -> List[str]:
-        """List registered attack names.
-
-        Args:
-            category: Optional category filter
-
-        Returns:
-            List of attack names
-        """
-        if category:
-            return [n for n, s in cls._registry.items() if s.category == category]
-        return list(cls._registry.keys())
-
-    @classmethod
-    def is_registered(cls, name: str) -> bool:
-        """Check if an attack is registered.
-
-        Args:
-            name: Attack name
-
-        Returns:
-            True if registered
-        """
-        return name in cls._registry
 
 
 def register_all_attacks():
@@ -102,7 +53,6 @@ def register_all_attacks():
     from .coa.coa_attack import COAAttack, COAAttackConfig
     from .advdiffvlm.advdiffvlm_attack import AdvDiffVLMAttack, AdvDiffVLMConfig
 
-    # === Physical Attacks (surrogate-based, transferable) ===
     AttackRegistry.register(AttackSpec(
         name="physpatch",
         category="physical",
@@ -110,7 +60,6 @@ def register_all_attacks():
         config_class=PhysPatchConfig,
     ))
 
-    # === FOA-Attack (full-image perturbation with OT loss) ===
     AttackRegistry.register(AttackSpec(
         name="foa",
         category="physical",
@@ -118,7 +67,6 @@ def register_all_attacks():
         config_class=FOAAttackConfig,
     ))
 
-    # === M-Attack (simple cosine similarity, NO OT) ===
     AttackRegistry.register(AttackSpec(
         name="mattack",
         category="physical",
@@ -126,7 +74,6 @@ def register_all_attacks():
         config_class=MAttackConfig,
     ))
 
-    # === CoA (Chain of Attack - iterative caption generation) ===
     AttackRegistry.register(AttackSpec(
         name="coa",
         category="physical",
@@ -134,7 +81,6 @@ def register_all_attacks():
         config_class=COAAttackConfig,
     ))
 
-    # === AdvDiffVLM (diffusion-based adversarial examples with AEGE) ===
     AttackRegistry.register(AttackSpec(
         name="advdiffvlm",
         category="diffusion",
@@ -142,14 +88,12 @@ def register_all_attacks():
         config_class=AdvDiffVLMConfig,
     ))
 
-    # === ADVEDM-A / ADVEDM-R (semantic addition / removal) ===
     from .advedm.advedm_attack import (
         ADVEDMAttack,
         ADVEDMConfig,
         ADVEDMRAttack,
         ADVEDMRConfig,
     )
-    # SSA-CWA + 4 CLIP ensemble (black-box transferable)
     AttackRegistry.register(AttackSpec(
         name="advedm",
         category="visual",
@@ -164,7 +108,6 @@ def register_all_attacks():
         config_class=ADVEDMRConfig,
     ))
 
-    # === FigStep (typographic prompt injection for AD hallucination) ===
     from .figstep.figstep_attack import FigStepAttack
     from .figstep.config import FigStepConfig
 
@@ -176,7 +119,6 @@ def register_all_attacks():
         defaults={"epsilon": 0.0, "max_iterations": 1},
     ))
 
-    # === V-Attack (text-guided Value feature manipulation) ===
     from .vattack.vattack_attack import VAttack, VAttackConfig
     AttackRegistry.register(AttackSpec(
         name="vattack",
@@ -185,7 +127,6 @@ def register_all_attacks():
         config_class=VAttackConfig,
     ))
 
-    # === PromptInject (text-level false premise injection) ===
     from .promptinject.promptinject_attack import PromptInjectAttack
     from .promptinject.config import PromptInjectConfig
 
@@ -197,7 +138,6 @@ def register_all_attacks():
         defaults={"epsilon": 0.0, "max_iterations": 1},
     ))
 
-    # === AnyAttack (learned Decoder, single forward pass) ===
     from .anyattack.anyattack_attack import AnyAttack, AnyAttackConfig
 
     AttackRegistry.register(AttackSpec(
@@ -207,7 +147,6 @@ def register_all_attacks():
         config_class=AnyAttackConfig,
     ))
 
-    # === PA-Attack (Prototype + Attention guided, untargeted) ===
     from .paattack.paattack_attack import PAAttack, PAAttackConfig
 
     AttackRegistry.register(AttackSpec(
@@ -217,7 +156,6 @@ def register_all_attacks():
         config_class=PAAttackConfig,
     ))
 
-    # === ImageMix (alpha-blend / cutmix pixel perturbation baseline) ===
     from .imagemix.imagemix_attack import ImageMixAttack, ImageMixConfig
 
     AttackRegistry.register(AttackSpec(
@@ -225,17 +163,5 @@ def register_all_attacks():
         category="physical",
         attack_class=ImageMixAttack,
         config_class=ImageMixConfig,
-        defaults={"epsilon": 0.0, "max_iterations": 1},
-    ))
-
-    # === Corruption (natural image corruptions, benign baseline) ===
-    from .corruption.corruption_attack import CorruptionAttack
-    from .corruption.config import CorruptionConfig
-
-    AttackRegistry.register(AttackSpec(
-        name="corruption",
-        category="natural",
-        attack_class=CorruptionAttack,
-        config_class=CorruptionConfig,
         defaults={"epsilon": 0.0, "max_iterations": 1},
     ))

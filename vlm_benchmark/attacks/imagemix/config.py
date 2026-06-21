@@ -34,19 +34,6 @@ def resolve_generate_kwargs(attack_name, args):
         "target_images_dir": "",
     }
 
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import EVAL_QUERY
-    mix_type = getattr(config, "mix_type", "mixup")
-    alpha = getattr(config, "alpha", 0.3)
-    return {
-        "description": f"ImageMix ({mix_type}, alpha={alpha})",
-        "reference_text": "Image mixing attack",
-        "target_image": None,
-        "evaluation_query": EVAL_QUERY,
-    }
-
-
 @dataclass
 class ImageMixConfig(AttackConfig):
     alpha: float = 0.3

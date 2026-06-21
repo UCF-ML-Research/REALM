@@ -3,7 +3,7 @@ from pathlib import Path
 import yaml
 import torch
 
-from .guided_diffusion.script_util import create_model_and_diffusion, model_and_diffusion_defaults
+from ..._guided_diffusion.script_util import create_model_and_diffusion, model_and_diffusion_defaults
 from .utils import dict2namespace
 
 

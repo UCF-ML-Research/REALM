@@ -16,25 +16,7 @@ def pgd_veattack(
         momentum=0.9,
         verbose=False
 ):
-    """Momentum PGD attack on vision encoder tokens.
-
-    Args:
-        forward: callable(image, output_normalize, tokens=True) -> (embedding, tokens)
-        loss_fn: callable(embedding, tokens) -> scalar loss
-        data_clean: clean image tensor in [0, 1]
-        norm: 'linf' or 'l2'
-        eps: perturbation budget
-        iterations: number of PGD steps
-        stepsize: step size per iteration
-        output_normalize: whether to L2-normalize encoder outputs
-        perturbation: initial perturbation (None -> zeros)
-        mode: 'min' or 'max'
-        momentum: momentum coefficient (default 0.9)
-        verbose: print loss at each step
-
-    Returns:
-        Adversarial image tensor (data_clean + perturbation), detached.
-    """
+    """Momentum PGD attack on vision encoder tokens."""
     assert torch.max(data_clean) < 1. + 1e-6 and torch.min(data_clean) > -1e-6
 
     if perturbation is None:
@@ -54,23 +36,19 @@ def pgd_veattack(
             if gradient.isnan().any():
                 print(f'attention: nan in gradient ({gradient.isnan().sum()})')
                 gradient[gradient.isnan()] = 0.
-            # normalize
             gradient = normalize_grad(gradient, p=norm)
-            # momentum
             velocity = momentum * velocity + gradient
             velocity = normalize_grad(velocity, p=norm)
-            # update
             if mode == 'min':
                 perturbation = perturbation - stepsize * velocity
             elif mode == 'max':
                 perturbation = perturbation + stepsize * velocity
             else:
                 raise ValueError(f'Unknown mode: {mode}')
-            # project
             perturbation = project_perturbation(perturbation, eps, norm)
             perturbation = torch.clamp(
                 data_clean + perturbation, 0, 1
-            ) - data_clean  # clamp to image space
+            ) - data_clean
             assert not perturbation.isnan().any()
             assert torch.max(data_clean + perturbation) < 1. + 1e-6 and torch.min(
                 data_clean + perturbation

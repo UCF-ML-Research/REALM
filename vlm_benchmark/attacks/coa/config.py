@@ -46,18 +46,6 @@ def resolve_generate_kwargs(attack_name, args):
     kwargs["clean_captions_path"] = get_clean_captions_path(args.clean_images)
     return kwargs
 
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import STANDARD_TARGETS, EVAL_QUERY
-    strategy = getattr(config, "target_strategy", "stop_sign")
-    base = STANDARD_TARGETS.get(strategy, {
-        "description": f"Target: {strategy}",
-        "reference_text": f"A {strategy} is visible",
-        "target_image": None,
-    })
-    return {**base, "evaluation_query": EVAL_QUERY}
-
-
 def get_clean_captions_path(clean_images_dir: str):
     """Get clean captions path based on clean images directory."""
     clean_path = Path(clean_images_dir)

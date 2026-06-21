@@ -1,7 +1,7 @@
 import torch
 from torch import nn, Tensor
 from abc import abstractmethod
-from typing import List, Any, Callable, Dict
+from typing import List, Any, Dict
 import torch.nn.functional as F
 import numpy as np
 
@@ -21,10 +21,9 @@ class EnsembleFeatureExtractor_ours(BaseFeatureExtractor):
         self.k = k
 
     def forward(self, x: Tensor) -> Tensor:
-        features = {}  
+        features = {}
         features_local = {}
         for i, model in enumerate(self.extractors):
-            # features[i] = model(x).squeeze()
             x_global, x_local = model.global_local_features(x.to(x.device))
             features[i] = x_global.squeeze()
             svd_feature = self.get_svd_feature(x_local[0], x.device)
@@ -39,12 +38,11 @@ class EnsembleFeatureExtractor_ours(BaseFeatureExtractor):
     
     
     def get_svd_feature(self, embedding_image, device):
-        # emdedding_image:[N, D]
-        U_o, S_o, _ = torch.linalg.svd(embedding_image, full_matrices=False) # [N, D], [D], [D, D]
+        U_o, S_o, _ = torch.linalg.svd(embedding_image, full_matrices=False)
 
-        U_o_k = U_o[:, :self.k] # [N, k]
-        S_o_k = S_o[:self.k] # [k]
-        feat_o_reduced = U_o_k @ torch.diag(S_o_k) # [N, k] @ [k, k] → [N, k]
+        U_o_k = U_o[:, :self.k]
+        S_o_k = S_o[:self.k]
+        feat_o_reduced = U_o_k @ torch.diag(S_o_k)
         return feat_o_reduced.to(device)
     
 class EnsembleFeatureLoss_ours_auto(nn.Module):
@@ -86,8 +84,6 @@ class EnsembleFeatureLoss_ours_auto(nn.Module):
             feature_local = feature_local_dict[index]
             feature = feature_dict[index]
             feature_full = feature_full_dict[index]
-            # feature_local = feature_local / feature_local.norm(dim=1, keepdim=True)
-            # gt_local = gt_local / gt_local.norm(dim=1, keepdim=True)
             loss_local_list.append(F.mse_loss(feature_local, gt_local))
             loss_list.append(torch.mean(torch.sum(feature * gt, dim=1)))
             loss_full_list.append(torch.mean(torch.sum(feature_full * gt_full, dim=1)))
@@ -121,13 +117,12 @@ class EnsembleFeatureLoss_ours_auto(nn.Module):
         return total_loss
     
     def get_svd_feature(self, embedding_image, device):
-        # emdedding_image:[N, D]
-        U_o, S_o, _ = torch.linalg.svd(embedding_image, full_matrices=False) # [N, D], [D], [D, D]
+        U_o, S_o, _ = torch.linalg.svd(embedding_image, full_matrices=False)
 
-        U_o_k = U_o[:, :self.k] # [N, k]
-        S_o_k = S_o[:self.k] # [k]
+        U_o_k = U_o[:, :self.k]
+        S_o_k = S_o[:self.k]
 
-        feat_o_reduced = U_o_k @ torch.diag(S_o_k) # [N, k] @ [k, k] → [N, k]
+        feat_o_reduced = U_o_k @ torch.diag(S_o_k)
         return feat_o_reduced.to(device)
 
 

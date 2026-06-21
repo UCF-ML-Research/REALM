@@ -1,5 +1,5 @@
 import torch
-from transformers import CLIPVisionModel, CLIPProcessor, CLIPModel
+from transformers import CLIPProcessor, CLIPModel
 from .Base import BaseFeatureExtractor
 from torchvision import transforms
 
@@ -19,7 +19,6 @@ class ClipL336FeatureExtractor(BaseFeatureExtractor):
     )
 
     def forward(self, x):
-        # x = torch.clamp(x, min=0, max=1)
         inputs = dict(pixel_values=self.normalizer(x))
         image_features = self.model.get_image_features(**inputs)
         # Handle both old (tensor) and new (BaseModelOutputWithPooling) transformers versions
@@ -29,7 +28,6 @@ class ClipL336FeatureExtractor(BaseFeatureExtractor):
         return image_features
 
     def global_local_features(self, x):
-        # x = torch.clamp(x, min=0, max=1)
         inputs = dict(pixel_values=self.normalizer(x))
 
         inputs["pixel_values"] = inputs["pixel_values"]

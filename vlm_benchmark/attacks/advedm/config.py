@@ -1,6 +1,5 @@
 """ADVEDM attack configuration (addition + removal variants)."""
 from pathlib import Path
-from typing import Optional
 
 _ADVEDM_DIR = Path(__file__).parent / "assets"
 
@@ -8,7 +7,6 @@ _ADVEDM_DIR = Path(__file__).parent / "assets"
 def resolve_cli_kwargs(attack_name, args, context):
     """Build kwargs for AttackRegistry.create() from CLI args."""
     if attack_name == "advedm":
-        # Support both single reference image and per-sample target directory
         ref_path = context.get("target_path", "")
         target_dir = context.get("target_dir", "")
         kwargs = {
@@ -17,12 +15,10 @@ def resolve_cli_kwargs(attack_name, args, context):
             "target_images_dir": target_dir,
         }
     else:
-        # advedm_r
         kwargs = {
             "device": args.device,
             "target_text": getattr(args, "target_text", ""),
         }
-    # Pass through SSA-CWA overrides (epsilon is [0,1] scale, e.g. 16/255)
     if getattr(args, "epsilon", None) is not None:
         kwargs["epsilon"] = args.epsilon
     if getattr(args, "steps", None) is not None:
@@ -63,7 +59,6 @@ def add_cli_args(parser):
                         help='ADVEDM-R top-k removal ratio (default: 0.2)')
     parser.add_argument('--advedm_r_mask_threshold', type=float, default=None,
                         help='ADVEDM-R optional Eq.4 threshold (overrides k-ratio mode)')
-    # Blackbox SSA-CWA params
     parser.add_argument('--advedm_bb_num_iters', type=int, default=None,
                         help='SSA-CWA outer iterations (default: 30)')
     parser.add_argument('--advedm_bb_epsilon', type=float, default=None,
@@ -122,26 +117,6 @@ def _apply_bb_cli_args(kwargs, args):
         if val is not None:
             kwargs[dest] = val
 
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import STANDARD_TARGETS, EVAL_QUERY
-    if attack_name == "advedm_r":
-        txt = getattr(config, "target_text", "unknown")
-        return {
-            "description": f"Semantic removal: {txt}",
-            "reference_text": f"Remove semantic: {txt}",
-            "target_image": None,
-            "evaluation_query": EVAL_QUERY,
-        }
-    strategy = getattr(config, "target_strategy", "stop_sign")
-    base = STANDARD_TARGETS.get(strategy, {
-        "description": f"Target: {strategy}",
-        "reference_text": f"A {strategy} is visible",
-        "target_image": None,
-    })
-    return {**base, "evaluation_query": EVAL_QUERY}
-
-
 def get_reference_image_path(target_strategy: str) -> str:
     """Return path to reference image for given target strategy."""
     ref_dir = _ADVEDM_DIR / "reference"
@@ -155,16 +130,3 @@ def get_reference_image_path(target_strategy: str) -> str:
     raise FileNotFoundError(
         f"Reference image not found for '{target_strategy}' in {ref_dir}"
     )
-
-
-def get_annotations_file(clean_images_dir: str) -> Optional[str]:
-    """Infer annotations JSON from dataset structure, or return None."""
-    dataset_root = Path(clean_images_dir).parent.parent
-    candidates = [
-        dataset_root / "annotations" / "advedm_bboxes.json",
-        dataset_root / "advedm_annotations.json",
-    ]
-    for p in candidates:
-        if p.exists():
-            return str(p)
-    return None

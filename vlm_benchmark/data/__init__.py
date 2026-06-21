@@ -1,18 +1,6 @@
-"""Data loading modules for VLM benchmark."""
+"""Data loading module for VLM benchmark."""
 
-from .base_dataset import Sample, DrivingSample, BaseDataset, BehaviorLabel
-from .drivebench_dataset import DriveBenchDataset
-from .robo2vlm_dataset import Robo2VLMDataset
-from .physpatch_dataset import PhysPatchDataset
+from .base_dataset import Sample, BaseDataset
+from .nips2017_dataset import Nips2017Dataset
 
-__all__ = [
-    # Base classes
-    "Sample",
-    "DrivingSample",  # backward-compatible alias (deprecated)
-    "BaseDataset",
-    "BehaviorLabel",
-    # Dataset implementations
-    "DriveBenchDataset",
-    "Robo2VLMDataset",
-    "PhysPatchDataset",
-]
+__all__ = ["Sample", "BaseDataset", "Nips2017Dataset"]

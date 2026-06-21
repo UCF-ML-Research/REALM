@@ -1,16 +1,9 @@
-"""ADVEDM attack wrappers for VLM benchmark framework.
-
-Integrates ADVEDM-A/R semantic addition/removal attacks and their black-box
-transfer variants (SSA-CWA + multi-CLIP ensemble) into the attack registry.
-Core logic lives in core/advedm_attack.py (unchanged from the original ADVEDM
-codebase).
-"""
+"""ADVEDM-A/R semantic addition/removal attack wrappers for the VLM benchmark."""
 
 import json
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -21,61 +14,10 @@ from ..base_attack import AttackConfig, AttackResult, BaseAttack
 from ...data import Sample
 
 
-# ---------------------------------------------------------------------------
-# Utility functions (inlined from ADVEDM/main.py)
-# ---------------------------------------------------------------------------
-
-def _select_contiguous_patch_block(
-    bbox_pixels: Tuple[int, int, int, int],
-    patch_size: int,
-    image_size: int,
-) -> torch.Tensor:
-    """
-    Convert pixel bounding box to contiguous patch indices.
-
-    Args:
-        bbox_pixels: (x, y, w, h) bounding box in pixel coordinates
-        patch_size: Size of each patch (e.g. 14 for ViT-L/14)
-        image_size: Image size in pixels (e.g. 336)
-
-    Returns:
-        Tensor of patch indices [k]
-    """
-    x, y, w, h = bbox_pixels
-    grid_size = image_size // patch_size
-
-    # Clamp to image bounds
-    x = max(0, min(x, image_size - 1))
-    y = max(0, min(y, image_size - 1))
-    w = max(1, min(w, image_size - x))
-    h = max(1, min(h, image_size - y))
-
-    # Convert pixel coords to patch coords
-    patch_x_start = x // patch_size
-    patch_y_start = y // patch_size
-    patch_x_end = min((x + w + patch_size - 1) // patch_size, grid_size)
-    patch_y_end = min((y + h + patch_size - 1) // patch_size, grid_size)
-
-    indices = []
-    for i in range(patch_y_start, patch_y_end):
-        for j in range(patch_x_start, patch_x_end):
-            indices.append(i * grid_size + j)
-
-    return torch.tensor(indices, dtype=torch.long)
-
-
-# ===========================================================================
-# Black-box transfer variants (SSA-CWA + multi-CLIP ensemble)
-# ===========================================================================
-
 @dataclass
 class ADVEDMConfig(AttackConfig):
-    """Configuration for ADVEDM-A attack (SSA-CWA + 4 CLIP ensemble).
+    """Configuration for ADVEDM-A attack (SSA-CWA + 4 CLIP ensemble)."""
 
-    Uses SSA-CWA optimizer with 4 CLIP surrogates for black-box transferability.
-    ε=16/255, 30 iterations (paper Appendix D defaults).
-    """
-    # SSA-CWA optimizer params
     epsilon: float = 16.0 / 255.0
     num_iters: int = 30
     inner_step_size: float = 250.0
@@ -85,33 +27,24 @@ class ADVEDMConfig(AttackConfig):
     ssa_sigma: float = 16.0 / 255.0
     ssa_rho: float = 0.5
 
-    # ADVEDM-A loss weights
-    # lambda_attention=0: L_fix preserves non-injection regions, which fights
-    # ASR in a benchmark where we want full-image semantic change.
     lambda_cls: float = 0.8
     lambda_preserve: float = 2.0
     lambda_attention: float = 0.0
     cls_fusion_alpha: float = 0.5
     attention_beta: float = 0.4
 
-    # Ensemble
-    ensemble_preset: str = "paper"  # "paper" for the 4-model ensemble
 
-    # Target specification (single image or per-sample directory)
     reference_image_path: Optional[str] = None
-    target_images_dir: Optional[str] = None  # dir with {stem}.jpg/.png per source
-    annotations_file: Optional[str] = None   # optional pre-computed bboxes JSON
+    target_images_dir: Optional[str] = None
+    annotations_file: Optional[str] = None
     region_size: int = 100
-    image_size: int = 224   # working resolution for adversarial image (surrogates resize as needed)
+    image_size: int = 224
 
 
 @dataclass
 class ADVEDMRConfig(AttackConfig):
-    """Configuration for ADVEDM-R attack (SSA-CWA + 4 CLIP ensemble).
+    """Configuration for ADVEDM-R attack (SSA-CWA + 4 CLIP ensemble)."""
 
-    Uses SSA-CWA optimizer with 4 CLIP surrogates for black-box transferability.
-    """
-    # SSA-CWA optimizer params
     epsilon: float = 16.0 / 255.0
     num_iters: int = 30
     inner_step_size: float = 250.0
@@ -121,44 +54,29 @@ class ADVEDMRConfig(AttackConfig):
     ssa_sigma: float = 16.0 / 255.0
     ssa_rho: float = 0.5
 
-    # ADVEDM-R loss weights
-    # lambda_fix=0: L_fix preserves non-removal regions, which fights
-    # ASR in a benchmark where we want full-image semantic change.
     lambda_cls: float = 0.5
     lambda_local: float = 2.0
     lambda_fix: float = 0.0
     k_ratio: float = 0.2
 
-    # Ensemble
-    ensemble_preset: str = "paper"
 
-    # Required semantic target
     target_text: Optional[str] = None
 
 
 class ADVEDMAttack(BaseAttack):
-    """
-    ADVEDM-A attack (default).
-
-    Uses AdvEDM losses (L_cls, L_p, L_fix) + SSA-CWA optimizer + 4 CLIP
-    surrogates for black-box transferability.
-    """
+    """ADVEDM-A attack using AdvEDM losses + SSA-CWA optimizer + 4 CLIP surrogates."""
 
     def __init__(self, config: ADVEDMConfig):
         super().__init__(config)
         self.config: ADVEDMConfig = config
 
         self._ensemble = None
-        self._attack_objs = None   # one per surrogate
-        self._current_ref: Optional[str] = None  # tracks which reference is loaded
+        self._attack_objs = None
+        self._current_ref: Optional[str] = None
         self._annotations: Optional[Dict[str, Any]] = None
 
     def _resolve_reference(self, sample_id: str) -> str:
-        """Resolve reference image path for a sample.
-
-        If target_images_dir is set, looks up {stem}.jpg/.png there.
-        Otherwise falls back to reference_image_path (single image).
-        """
+        """Resolve reference image path for a sample from target dir or single image."""
         if self.config.target_images_dir:
             d = Path(self.config.target_images_dir)
             for ext in (".jpg", ".png", ".jpeg"):
@@ -173,10 +91,7 @@ class ADVEDMAttack(BaseAttack):
         )
 
     def _initialize(self, reference_path: str) -> None:
-        """Lazy-load ensemble and create per-surrogate attack objects.
-
-        Re-creates attack objects if the reference image changes.
-        """
+        """Lazy-load ensemble and create per-surrogate attack objects."""
         if self._ensemble is not None and self._current_ref == reference_path:
             return
 
@@ -189,14 +104,11 @@ class ADVEDMAttack(BaseAttack):
             )
             self._ensemble.load_all()
 
-        # Create (or recreate) one ADVEDMSemanticAdditionPaperExact per surrogate
         from .core.advedm_attack import ADVEDMSemanticAdditionPaperExact
 
         self._attack_objs = []
         for sm in self._ensemble.surrogates:
-            # SigLIP has no CLS token → attention is uniform (1/N) →
-            # attention-weighted patch losses (L_p, L_fix) carry no spatial
-            # signal.  Only keep L_cls for these surrogates.
+            # SigLIP has no CLS token → uniform attention → keep only L_cls
             lam_p = self.config.lambda_preserve if sm.has_cls else 0.0
             lam_a = self.config.lambda_attention if sm.has_cls else 0.0
             atk = ADVEDMSemanticAdditionPaperExact(
@@ -234,13 +146,7 @@ class ADVEDMAttack(BaseAttack):
         sample: Sample,
         image_tensor: torch.Tensor,
     ) -> Tuple[int, int, int, int]:
-        """Return injection bbox for ADVEDM-A.
-
-        Priority:
-          1. Pre-computed annotations_file entry (if provided).
-          2. CLIP attention-based auto-detection: lowest-attention k×k block
-             = background region the model looks at least.
-        """
+        """Return injection bbox from annotations file, else CLIP attention auto-detection."""
         image_file = str(sample.metadata.get("image_file", ""))
         annotations = self._load_annotations()
         if annotations is not None and image_file:
@@ -299,7 +205,6 @@ class ADVEDMAttack(BaseAttack):
         ensemble = self._ensemble
         attack_objs = self._attack_objs
 
-        # Pre-compute clean image features per surrogate (no grad)
         clean_cache = []
         for sm, atk in zip(ensemble.surrogates, attack_objs):
             with torch.no_grad():
@@ -317,7 +222,6 @@ class ADVEDMAttack(BaseAttack):
                 "target_indices": target_idx,
             })
 
-        # Build per-surrogate loss closures for SSA-CWA
         def make_loss_fn(cache_entry, surrogate_idx):
             sm = cache_entry["sm"]
             atk = cache_entry["atk"]
@@ -348,13 +252,12 @@ class ADVEDMAttack(BaseAttack):
                     print(f"  [ADVEDM-A sur0 iter={outer_iter:2d}] loss={loss.item():.4f}  "
                           f"cls={components['cls']:.4f}  ref={components['reference_sim']:.4f}  "
                           f"fix={components['attention_fix']:.4f}", flush=True)
-                return -loss  # Negate: SSA ascends, loss is for minimization
+                return -loss  # SSA ascends, so negate the minimization loss
 
             return loss_fn
 
         loss_fns = [make_loss_fn(c, i) for i, c in enumerate(clean_cache)]
 
-        # Run SSA-CWA
         from .core.ssa_cwa import ssa_cwa_attack
 
         adv_tensor = ssa_cwa_attack(
@@ -391,33 +294,19 @@ class ADVEDMAttack(BaseAttack):
             },
         )
 
-    def is_gradient_based(self) -> bool:
-        return True
-
 
 class ADVEDMRAttack(BaseAttack):
-    """
-    ADVEDM-R attack (default).
-
-    Uses AdvEDM-R losses (L_cls, L_p, L_fix) + SSA-CWA optimizer + 4 CLIP
-    surrogates for black-box transferability.
-    """
+    """ADVEDM-R attack using AdvEDM-R losses + SSA-CWA optimizer + 4 CLIP surrogates."""
 
     def __init__(self, config: ADVEDMRConfig):
         super().__init__(config)
         self.config: ADVEDMRConfig = config
 
         self._ensemble = None
-        self._attack_objs = None   # one per surrogate
+        self._attack_objs = None
 
     def _initialize(self) -> None:
-        """Lazy-load ensemble (once) and create per-surrogate attack objects.
-
-        Ensemble loading is expensive (4 CLIP models); attack_obj creation is
-        cheap (text embedding only).  Resetting self._attack_objs = None and
-        updating self.config.target_text allows per-sample target refresh
-        without reloading the ensemble.
-        """
+        """Lazy-load ensemble (once) and create per-surrogate attack objects."""
         if self._ensemble is None:
             from .core.ensemble_encoder import EnsembleEncoder, PAPER_ENSEMBLE
 
@@ -471,12 +360,11 @@ class ADVEDMRAttack(BaseAttack):
         **kwargs,
     ) -> AttackResult:
         """Generate ADVEDM-R blackbox adversarial image."""
-        # ADVEDM-R removes the SOURCE object's semantics — always use attack_source_text.
-        # attack_target_text is the object to inject (used by ADVEDM-A), not remove.
+        # ADVEDM-R removes the SOURCE object's semantics, so use attack_source_text
         per_sample_text = (sample.metadata or {}).get("attack_source_text")
         if per_sample_text and per_sample_text != self.config.target_text:
             self.config.target_text = per_sample_text
-            self._attack_objs = None  # Force re-creation with new text
+            self._attack_objs = None
 
         self._initialize()
 
@@ -495,7 +383,6 @@ class ADVEDMRAttack(BaseAttack):
             create_masked_image,
         )
 
-        # Pre-compute clean image features + mask per surrogate (no grad)
         clean_cache = []
         for sm, atk in zip(ensemble.surrogates, attack_objs):
             with torch.no_grad():
@@ -503,14 +390,11 @@ class ADVEDMRAttack(BaseAttack):
                 patches_orig, cls_orig = ensemble.extract_features(sm, img_norm)
                 A_orig = ensemble.extract_attention(sm, img_norm)
 
-                # Compute text-patch similarity mask for this surrogate
-                # Project patches to output embedding space (same space as text features)
+                # Project patches to text-feature embedding space for similarity mask
                 patches_proj = ensemble.project_patches(sm, patches_orig)
                 S = compute_text_patch_similarity(patches_proj, atk.target_text_embed)
                 mask = construct_top_k_mask(S, k_ratio=self.config.k_ratio)
 
-                # Create masked image and extract its features
-                # Need to resize image_tensor to surrogate's size first
                 sz = sm.image_size
                 ps = sm.patch_size
                 if image_tensor.shape[2] != sz or image_tensor.shape[3] != sz:
@@ -537,7 +421,6 @@ class ADVEDMRAttack(BaseAttack):
                 "mask": mask,
             })
 
-        # Build per-surrogate loss closures
         def make_loss_fn(cache_entry, surrogate_idx):
             sm = cache_entry["sm"]
             atk = cache_entry["atk"]
@@ -553,7 +436,6 @@ class ADVEDMRAttack(BaseAttack):
                 patches_adv, cls_adv = ensemble.extract_features(sm, img_norm)
                 A_adv = ensemble.extract_attention(sm, img_norm).detach()
 
-                # Project CLS to output embedding space (same space as text features)
                 cls_adv_proj = ensemble.project_patches(sm, cls_adv.unsqueeze(1)).squeeze(1)
 
                 loss, components = atk.compute_total_loss(
@@ -571,13 +453,12 @@ class ADVEDMRAttack(BaseAttack):
                     print(f"  [ADVEDM-R sur0 iter={outer_iter:2d}] loss={loss.item():.4f}  "
                           f"cls={components['cls']:.4f}  local={components['local']:.4f}  "
                           f"fix={components['fix']:.4f}", flush=True)
-                return -loss  # Negate: SSA ascends, loss is for minimization
+                return -loss  # SSA ascends, so negate the minimization loss
 
             return loss_fn
 
         loss_fns = [make_loss_fn(c, i) for i, c in enumerate(clean_cache)]
 
-        # Run SSA-CWA
         from .core.ssa_cwa import ssa_cwa_attack
 
         adv_tensor = ssa_cwa_attack(
@@ -614,16 +495,9 @@ class ADVEDMRAttack(BaseAttack):
             },
         )
 
-    def is_gradient_based(self) -> bool:
-        return True
-
 
 class _SurrogateTextEncoder:
-    """Adapter: wraps EnsembleEncoder.encode_text for a specific surrogate.
-
-    ADVEDMSemanticRemovalPaperExact calls self.text_encoder.encode_text([text])
-    in __init__. This adapter forwards that call through the ensemble.
-    """
+    """Adapter that forwards encode_text calls to the ensemble for a specific surrogate."""
 
     def __init__(self, ensemble, surrogate):
         self._ensemble = ensemble

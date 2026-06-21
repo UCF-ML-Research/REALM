@@ -55,23 +55,10 @@ def resolve_generate_kwargs(attack_name, args):
         "level": args.promptinject_level,
     }
 
-
-def get_eval_target(attack_name, config):
-    from ..cli_utils import EVAL_QUERY
-    target = getattr(config, "target_text", None) or "unknown"
-    return {
-        "description": f"Prompt injection: {target}",
-        "reference_text": f"A {target} is visible",
-        "target_image": None,
-        "evaluation_query": EVAL_QUERY,
-    }
-
-
 @dataclass
 class PromptInjectConfig(AttackConfig):
     target_text: Optional[str] = None
     injection_text: Optional[str] = None  # override LLM-generated injection
     level: str = "instruction"       # "instruction" | "authority"
-    # LLM server for generating injection text
     llm_server_url: Optional[str] = None   # e.g. "http://localhost:8001"
     llm_model: Optional[str] = None        # e.g. "Qwen/Qwen3-8B"

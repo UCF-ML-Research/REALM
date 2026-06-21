@@ -28,9 +28,6 @@ class FreqPureDefense(BaseDefense):
         self.config: FreqPureDefenseConfig = config
         self._purifier = None     # lazy — PurificationForward instance
 
-    def requires_model(self) -> bool:
-        return False
-
     def _initialize_models(self):
         if self._purifier is not None:
             return
