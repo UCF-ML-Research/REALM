@@ -125,3 +125,19 @@ result.adversarial_sample.save("adversarial.jpg")
 | PAD | Patch removal | MI/CD heatmap fusion → SAM segmentation → patch removal |
 | FreqPure | Frequency purification | FFT amplitude swap + phase clipping + diffusion denoising |
 | BlueSuffix | Multimodal purification | Image denoising + text purification + defensive suffix |
+
+## Acknowledgements
+
+This project integrates adversarial attack methods proposed by prior research. We thank the original authors for making their work publicly available.
+
+## Citation
+
+If you find our repo useful, please cite our paper:
+
+```bibtex
+@article{realm,
+  title   = {ReaLM: A Unified Red-Teaming Benchmark for Physical-World VLMs},
+  author  = {Zhao, Yifei and Lou, Qian and Zheng, Mengxin},
+  year    = {2026},
+}
+```
