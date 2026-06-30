@@ -135,9 +135,10 @@ This project integrates adversarial attack methods proposed by prior research. W
 If you find our repo useful, please cite our paper:
 
 ```bibtex
-@article{realm,
-  title   = {ReaLM: A Unified Red-Teaming Benchmark for Physical-World VLMs},
-  author  = {Zhao, Yifei and Lou, Qian and Zheng, Mengxin},
-  year    = {2026},
+@article{zhao2026realm,
+  title={REALM: A Unified Red-Teaming Benchmark for Physical-World VLMs},
+  author={Zhao, Yifei and Lou, Qian and Zheng, Mengxin},
+  journal={arXiv preprint arXiv:2606.23892},
+  year={2026}
 }
 ```
